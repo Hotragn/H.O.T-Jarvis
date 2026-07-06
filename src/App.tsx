@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import Waveform, { type WaveState } from "./components/Waveform";
+import ArcCore, { type CoreState } from "./components/ArcCore";
 import { chatSend, getHistory, getStatus, type Status } from "./lib/ipc";
 import { describeStatus } from "./lib/status";
 import {
@@ -77,6 +77,7 @@ export default function App() {
           meta: `${reply.provider} · ${reply.model}`,
         },
       ]);
+      getStatus().then(setStatus).catch(() => {});
     } catch (err) {
       setItems((prev) => [
         ...prev,
@@ -88,7 +89,7 @@ export default function App() {
   }, [draft, busy]);
 
   const pill = describeStatus(status);
-  const waveState: WaveState = busy
+  const coreState: CoreState = busy
     ? "thinking"
     : status?.ready
       ? "idle"
@@ -101,21 +102,36 @@ export default function App() {
           <span className="brand-name">H.O.T-JARVIS</span>
           <span className="brand-sub">local-first assistant · free forever</span>
         </div>
-        <span className="status-pill" data-tone={pill.tone}>
-          <span className="status-dot" />
-          {pill.label}
-        </span>
+        <span className="version-tag">v0.1.0</span>
         <button
           type="button"
           className="theme-toggle"
           onClick={() => setTheme((t) => nextTheme(t))}
           aria-label={`switch to ${nextTheme(theme)} theme`}
         >
-          {theme === "dark" ? "☀ light" : "☾ dark"}
+          {theme === "dark" ? "light" : "dark"}
         </button>
       </header>
 
-      <Waveform state={waveState} theme={theme} />
+      <section className="core-row">
+        <div className="readout">
+          <span className="readout-label">memory</span>
+          <span className="readout-value">
+            {status ? status.message_count : "—"}
+          </span>
+          <span className="readout-sub">
+            messages held · {status ? status.fact_count : "—"} facts
+          </span>
+        </div>
+        <ArcCore state={coreState} theme={theme} />
+        <div className="readout" data-side="right">
+          <span className="readout-label">model link</span>
+          <span className="readout-value" data-tone={pill.tone}>
+            {busy ? "thinking" : pill.tone === "ok" ? "online" : "standby"}
+          </span>
+          <span className="readout-sub">{pill.label}</span>
+        </div>
+      </section>
 
       <div className="chat-scroll" ref={scrollRef}>
         {status && !status.ready && status.onboarding && (
@@ -125,7 +141,7 @@ export default function App() {
         )}
         {items.length === 0 && (!status || status.ready) && (
           <div className="empty-state">
-            <h1>Ready when you are.</h1>
+            <h1>Ready when you are</h1>
             <p>Everything you say here is remembered locally — even after a restart.</p>
           </div>
         )}
