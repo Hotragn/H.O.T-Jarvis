@@ -2,6 +2,10 @@
 
 One short entry per meaningful decision. Newest at the top. Cite sources for ideas borrowed from papers or other projects (ideas only — implementations here are original).
 
+## 2026-07-06 — HUD visual language: instrument panel, one glow
+
+Owner supplied film-Jarvis reference imagery (wallpapercave.com/jarvis-wallpapers). Reading the references closely: they are *restrained* — mostly monochrome steel hairlines and tiny uppercase mono labels, with exactly one bright element (the circular core). Adopted as a hard rule: glow is reserved for the arc-reactor core (canvas `ArcCore`, the app's signature element — its offline/idle/thinking states are the primary trust signal) and everything else stays hairlines and type. Light theme reinterprets the same instrument as a blueprint on paper rather than a dimmed dark theme. System fonts only (offline-first, no font downloads). Original implementation; imagery used as mood reference only.
+
 ## 2026-07-05 — Bootstrap stack: Tauri v2 + React/TS + Rust core
 
 - **Desktop shell: Tauri v2** (default per the project brief): light installers, low idle RAM, Rust backend suits the future low-latency voice pipeline. Electron kept as a documented fallback only.
