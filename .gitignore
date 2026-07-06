@@ -1,0 +1,44 @@
+# --- secrets & env ---
+.env
+.env.*
+!.env.example
+
+# --- agent/prompt files (kept local, never pushed) ---
+.claude/
+CLAUDE.md
+docs/agentbrief*
+docs/AGENT_BRIEF*
+.jarvis/
+
+# --- runtime data: memory, models, logs ---
+data/
+*.sqlite3
+*.sqlite3-*
+*.db
+models/
+logs/
+*.log
+
+# --- node ---
+node_modules
+dist
+dist-ssr
+*.local
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# --- rust / tauri ---
+src-tauri/target
+src-tauri/gen/schemas
+
+# --- editors & os ---
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
