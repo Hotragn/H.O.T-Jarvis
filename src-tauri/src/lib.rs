@@ -4,6 +4,9 @@
 
 pub mod core;
 
+use crate::core::authoring::{
+    authoring_messages, parse_skill_draft, refinement_message, MAX_ATTEMPTS,
+};
 use crate::core::eventlog::{Event, EventLog};
 use crate::core::memory::{MemoryStore, StoredMessage};
 use crate::core::router::{onboarding_message, ChatMessage, ChatReply, Router, RouterConfig};
@@ -259,6 +262,95 @@ fn save_skill(
     Ok(manifest)
 }
 
+#[derive(serde::Serialize)]
+struct AuthoringOutcome {
+    manifest: SkillManifest,
+    attempts: u32,
+    passed: bool,
+}
+
+/// "Jarvis, learn to do X": the model drafts code + test, the engine
+/// validates by running the test, and failures loop back to the model
+/// with the error for up to MAX_ATTEMPTS rounds. The final draft is saved
+/// either way — a failing skill lands flagged, visible, and refusable.
+#[tauri::command]
+async fn author_skill(
+    state: tauri::State<'_, AppState>,
+    request: String,
+) -> Result<AuthoringOutcome, String> {
+    let trimmed = request.trim().to_string();
+    if trimmed.is_empty() {
+        return Err("describe what the skill should do".into());
+    }
+    let mut conversation = authoring_messages(&trimmed);
+    let mut last_error = String::new();
+    let mut saved: Option<SkillManifest> = None;
+
+    for attempt in 1..=MAX_ATTEMPTS {
+        let reply = state
+            .router
+            .chat(&conversation)
+            .await
+            .map_err(|e| e.to_string())?;
+        conversation.push(ChatMessage {
+            role: "assistant".into(),
+            content: reply.content.clone(),
+        });
+
+        match parse_skill_draft(&reply.content) {
+            Ok(draft) => {
+                let manifest = state
+                    .skills
+                    .save_skill(&draft.name, &draft.description, &draft.code, &draft.test)
+                    .map_err(|e| e.to_string())?;
+                let passed = matches!(
+                    manifest.test_status,
+                    crate::core::skills::TestStatus::Passed
+                );
+                log_event(
+                    &state,
+                    "skill.authored",
+                    serde_json::json!({
+                        "name": manifest.name,
+                        "version": manifest.version,
+                        "attempt": attempt,
+                        "test_status": manifest.test_status,
+                        "request": trimmed,
+                    }),
+                );
+                if passed {
+                    return Ok(AuthoringOutcome {
+                        manifest,
+                        attempts: attempt,
+                        passed: true,
+                    });
+                }
+                last_error = match &manifest.test_status {
+                    crate::core::skills::TestStatus::Failed(detail) => detail.clone(),
+                    _ => "unknown failure".into(),
+                };
+                saved = Some(manifest);
+            }
+            Err(parse_error) => {
+                last_error = parse_error;
+            }
+        }
+        conversation.push(refinement_message(&last_error));
+    }
+
+    match saved {
+        // Out of attempts: report the flagged skill honestly.
+        Some(manifest) => Ok(AuthoringOutcome {
+            manifest,
+            attempts: MAX_ATTEMPTS,
+            passed: false,
+        }),
+        None => Err(format!(
+            "the model never produced a usable skill draft (last error: {last_error})"
+        )),
+    }
+}
+
 #[tauri::command]
 fn list_skills(state: tauri::State<'_, AppState>) -> Result<Vec<SkillManifest>, String> {
     state.skills.list_skills().map_err(|e| e.to_string())
@@ -369,6 +461,7 @@ pub fn run() {
             list_notes,
             read_note,
             save_skill,
+            author_skill,
             list_skills,
             test_skill,
             run_skill,

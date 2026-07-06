@@ -19,7 +19,8 @@ Machine-readable task queue. Status: `ready` | `in-progress` | `done` | `blocked
 - [ ] `ready` Replay v1: deterministic re-run of a session from the event log; undo for reversible actions (§5.4)
 - [ ] `ready` Memory: local vector store for semantic recall (FAISS/Chroma/Qdrant equivalent that's Rust-friendly, e.g. sqlite-vec)
 - [x] `done` Skill engine v0: manifest + versioned Rhai skills + "every skill ships a test" harness; failing skills flagged and refused (§5.1)
-- [ ] `ready` Skill engine v1: let the assistant author skills from chat (LLM writes code + test, engine validates)
+- [x] `done` Skill engine v1: assistant authors skills on request (LLM writes code + test, engine validates, Reflexion refinement loop, flagged if never passing)
+- [ ] `ready` Skill quality: use Ollama structured output (format json) for authoring; consider few-shot per failure class
 - [ ] `ready` Confidence estimate v0: pre-action self-rating surfaced in the HUD (§5.3)
 - [ ] `blocked (needs event log)` Replay timeline UI v0 (§5.4)
 - [ ] `ready` Reflection pass v0: periodic summarization of reasoning traces into memory (§5.2)

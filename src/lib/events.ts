@@ -31,6 +31,11 @@ export function summarizeEvent(event: AppEvent): string {
         (p.test_status as { status?: string } | undefined)?.status ?? "?";
       return `saved skill "${str(p.name)}" v${p.version} · test ${status}`;
     }
+    case "skill.authored": {
+      const status =
+        (p.test_status as { status?: string } | undefined)?.status ?? "?";
+      return `authored skill "${str(p.name)}" (attempt ${p.attempt}) · test ${status}`;
+    }
     case "skill.tested": {
       const status =
         (p.test_status as { status?: string } | undefined)?.status ?? "?";
