@@ -18,11 +18,15 @@ First-session bootstrap in progress on branch `feat/bootstrap-core`. Repo went f
 - Git remote: https://github.com/Hotragn/H.O.T-Jarvis (push access assumed via credential manager).
 - Prompt/agent files (`CLAUDE.md`, `docs/agentbrief*`, `.claude/`) are **gitignored by owner request** — never commit them.
 
+## Milestones verified
+
+- 2026-07-06: Owner ran `npm run tauri dev` with live Ollama (llama3.2) — app works end-to-end on the target machine. PR #1 merged; branch auto-cleanup workflow confirmed working.
+
 ## Next 3 tasks
 
-1. Verify `npm run tauri dev` end-to-end with a live Ollama model (needs Ollama installed) and record the README GIF — now shows tabs, palette, live telemetry.
-2. Router hardening: response caching + per-provider backoff (free-tier hygiene).
-3. Event log v0 (append-only JSONL) — groundwork for replay & undo (§5.4).
+1. Router hardening: response caching + per-provider backoff (free-tier hygiene).
+2. Include events.jsonl in memory export; wire event log into the wipe story (user data completeness).
+3. Record the README GIF now that the HUD is real.
 
 ## UI state (2026-07-06)
 

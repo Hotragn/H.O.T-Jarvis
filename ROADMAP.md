@@ -15,7 +15,8 @@ Machine-readable task queue. Status: `ready` | `in-progress` | `done` | `blocked
 
 ## M1 — Hero feature foundations
 
-- [ ] `ready` Event log v0: append-only JSONL of every action with enough state to replay (§5.4 groundwork)
+- [x] `done` Event log v0: append-only JSONL of every action (chat, notes, wipes, startups) + read-only timeline tab (§5.4 groundwork)
+- [ ] `ready` Replay v1: deterministic re-run of a session from the event log; undo for reversible actions (§5.4)
 - [ ] `ready` Memory: local vector store for semantic recall (FAISS/Chroma/Qdrant equivalent that's Rust-friendly, e.g. sqlite-vec)
 - [ ] `ready` Skill engine v0: skill manifest format + loader + "every skill ships a test" harness (§5.1)
 - [ ] `ready` Confidence estimate v0: pre-action self-rating surfaced in the HUD (§5.3)

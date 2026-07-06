@@ -19,6 +19,7 @@ import {
   THEME_STORAGE_KEY,
   type Theme,
 } from "./lib/theme";
+import EventsView from "./views/EventsView";
 import MemoryView from "./views/MemoryView";
 import NotesView from "./views/NotesView";
 
@@ -29,18 +30,20 @@ interface ChatItem {
   meta?: string;
 }
 
-type Tab = "chat" | "notes" | "memory";
+type Tab = "chat" | "notes" | "memory" | "events";
 
 const TABS: { id: Tab; label: string; shortcut: string }[] = [
   { id: "chat", label: "chat", shortcut: "ctrl+1" },
   { id: "notes", label: "notes", shortcut: "ctrl+2" },
   { id: "memory", label: "memory", shortcut: "ctrl+3" },
+  { id: "events", label: "events", shortcut: "ctrl+4" },
 ];
 
 const PALETTE_COMMANDS: PaletteCommand[] = [
   { id: "tab-chat", label: "Go to chat", hint: "ctrl+1" },
   { id: "tab-notes", label: "Go to notes", hint: "ctrl+2" },
   { id: "tab-memory", label: "Go to memory", hint: "ctrl+3" },
+  { id: "tab-events", label: "Go to event log", hint: "ctrl+4" },
   { id: "focus-composer", label: "Talk to Jarvis", hint: "chat" },
   { id: "theme-toggle", label: "Toggle theme" },
 ];
@@ -120,6 +123,7 @@ export default function App() {
     if (id === "tab-chat") setTab("chat");
     else if (id === "tab-notes") setTab("notes");
     else if (id === "tab-memory") setTab("memory");
+    else if (id === "tab-events") setTab("events");
     else if (id === "theme-toggle") setTheme((t) => nextTheme(t));
     else if (id === "focus-composer") {
       setTab("chat");
@@ -133,7 +137,7 @@ export default function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPaletteOpen((open) => !open);
-      } else if (e.ctrlKey && ["1", "2", "3"].includes(e.key)) {
+      } else if (e.ctrlKey && ["1", "2", "3", "4"].includes(e.key)) {
         e.preventDefault();
         setTab(TABS[Number(e.key) - 1].id);
       }
@@ -330,6 +334,7 @@ export default function App() {
           </>
         )}
         {tab === "notes" && <NotesView />}
+        {tab === "events" && <EventsView />}
         {tab === "memory" && (
           <MemoryView
             messageCount={messageCount}

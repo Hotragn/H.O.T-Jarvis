@@ -4,6 +4,7 @@
 
 pub mod core;
 
+use crate::core::eventlog::{Event, EventLog};
 use crate::core::memory::{MemoryStore, StoredMessage};
 use crate::core::router::{onboarding_message, ChatMessage, ChatReply, Router, RouterConfig};
 use crate::core::tools::NotesTool;
@@ -16,8 +17,16 @@ struct AppState {
     memory: Mutex<MemoryStore>,
     router: Router,
     notes: NotesTool,
+    events: Mutex<EventLog>,
     system: Mutex<sysinfo::System>,
     started: Instant,
+}
+
+/// Best-effort append; the log must never take the assistant down with it.
+fn log_event(state: &AppState, kind: &str, payload: serde_json::Value) {
+    if let Ok(mut events) = state.events.lock() {
+        let _ = events.append(kind, payload);
+    }
 }
 
 #[derive(serde::Serialize)]
@@ -120,17 +129,37 @@ async fn chat_send(state: tauri::State<'_, AppState>, text: String) -> Result<Ch
             });
         }
     }
-    let reply = state
-        .router
-        .chat(&context)
-        .await
-        .map_err(|e| e.to_string())?;
-    {
-        let mem = state.memory.lock().map_err(|e| e.to_string())?;
-        mem.append_message("assistant", &reply.content)
-            .map_err(|e| e.to_string())?;
+    log_event(&state, "chat.user", serde_json::json!({ "text": trimmed }));
+    let asked_at = Instant::now();
+    let outcome = state.router.chat(&context).await;
+    match outcome {
+        Ok(reply) => {
+            {
+                let mem = state.memory.lock().map_err(|e| e.to_string())?;
+                mem.append_message("assistant", &reply.content)
+                    .map_err(|e| e.to_string())?;
+            }
+            log_event(
+                &state,
+                "chat.assistant",
+                serde_json::json!({
+                    "text": reply.content,
+                    "provider": reply.provider,
+                    "model": reply.model,
+                    "duration_ms": asked_at.elapsed().as_millis() as u64,
+                }),
+            );
+            Ok(reply)
+        }
+        Err(e) => {
+            log_event(
+                &state,
+                "chat.failed",
+                serde_json::json!({ "error": e.to_string() }),
+            );
+            Err(e.to_string())
+        }
     }
-    Ok(reply)
 }
 
 #[tauri::command]
@@ -149,10 +178,16 @@ fn save_note(
     title: String,
     content: String,
 ) -> Result<String, String> {
-    state
+    let slug = state
         .notes
         .save_note(&title, &content)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    log_event(
+        &state,
+        "note.saved",
+        serde_json::json!({ "slug": slug, "chars": content.len() }),
+    );
+    Ok(slug)
 }
 
 #[tauri::command]
@@ -206,8 +241,20 @@ fn export_memory(state: tauri::State<'_, AppState>) -> Result<serde_json::Value,
 
 #[tauri::command]
 fn wipe_memory(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    let mem = state.memory.lock().map_err(|e| e.to_string())?;
-    mem.wipe().map_err(|e| e.to_string())
+    {
+        let mem = state.memory.lock().map_err(|e| e.to_string())?;
+        mem.wipe().map_err(|e| e.to_string())?;
+    }
+    log_event(&state, "memory.wiped", serde_json::json!({}));
+    Ok(())
+}
+
+#[tauri::command]
+fn get_events(state: tauri::State<'_, AppState>, limit: Option<u32>) -> Result<Vec<Event>, String> {
+    let events = state.events.lock().map_err(|e| e.to_string())?;
+    events
+        .tail(limit.unwrap_or(200) as usize)
+        .map_err(|e| e.to_string())
 }
 
 fn resolve_data_dir(app: &tauri::App) -> Result<PathBuf, Box<dyn std::error::Error>> {
@@ -227,10 +274,16 @@ pub fn run() {
             let memory = MemoryStore::open(&data_dir.join("jarvis.sqlite3"))?;
             let router = Router::new(RouterConfig::from_env());
             let notes = NotesTool::new(&data_dir);
+            let mut events = EventLog::open(&data_dir.join("events.jsonl"))?;
+            let _ = events.append(
+                "app.started",
+                serde_json::json!({ "version": app.package_info().version.to_string() }),
+            );
             app.manage(AppState {
                 memory: Mutex::new(memory),
                 router,
                 notes,
+                events: Mutex::new(events),
                 system: Mutex::new(sysinfo::System::new()),
                 started: Instant::now(),
             });
@@ -241,6 +294,7 @@ pub fn run() {
             chat_send,
             get_history,
             get_telemetry,
+            get_events,
             save_note,
             list_notes,
             read_note,

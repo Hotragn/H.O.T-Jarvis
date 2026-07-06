@@ -41,6 +41,13 @@ export interface Telemetry {
   fact_count: number;
 }
 
+export interface AppEvent {
+  id: number;
+  ts: number;
+  kind: string;
+  payload: Record<string, unknown>;
+}
+
 export const inTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -75,6 +82,11 @@ export async function chatSend(text: string): Promise<ChatReply> {
 export async function getTelemetry(): Promise<Telemetry | null> {
   if (!inTauri) return null;
   return invoke<Telemetry>("get_telemetry");
+}
+
+export async function getEvents(limit = 200): Promise<AppEvent[]> {
+  if (!inTauri) return [];
+  return invoke<AppEvent[]>("get_events", { limit });
 }
 
 export async function listNotes(): Promise<string[]> {
