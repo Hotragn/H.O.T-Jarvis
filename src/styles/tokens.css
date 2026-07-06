@@ -1,0 +1,78 @@
+/* Design tokens — every color, radius, duration in the app comes from here.
+   Themes switch by flipping data-theme on <html>; components never hardcode.
+
+   Visual language: film-Jarvis instrument panel. Near-black steel, hairline
+   rules, tiny uppercase mono labels — and exactly one glowing element, the
+   arc-reactor core. Light theme is the same instrument drawn as a blueprint
+   on paper. */
+
+:root {
+  --font-ui: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "Cascadia Code", "SF Mono", Consolas, monospace;
+
+  --radius-sm: 3px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  --dur-quick: 150ms;
+  --dur-med: 320ms;
+  --dur-slow: 700ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.4, 1);
+
+  --space-1: 6px;
+  --space-2: 10px;
+  --space-3: 16px;
+  --space-4: 24px;
+  --space-5: 40px;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #04070d;
+  --bg-glow: rgba(38, 142, 191, 0.1);
+  --panel: rgba(129, 180, 219, 0.04);
+  --panel-strong: rgba(129, 180, 219, 0.09);
+  --line: rgba(129, 190, 232, 0.16);
+  --line-strong: rgba(129, 190, 232, 0.34);
+  --text: #d9e7f2;
+  --text-dim: #64788f;
+  --accent: #38c6f4;
+  --accent-ink: #02171f;
+  --accent-glow: rgba(56, 198, 244, 0.4);
+  --accent-2: #56dfb4;
+  --warn: #f0b23e;
+  --warn-surface: rgba(240, 178, 62, 0.09);
+  --danger: #f4705f;
+  --user-bubble: rgba(56, 198, 244, 0.09);
+  --shadow: 0 18px 50px rgba(0, 2, 8, 0.6);
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+  --bg: #edf1f5;
+  --bg-glow: rgba(14, 127, 174, 0.08);
+  --panel: rgba(255, 255, 255, 0.75);
+  --panel-strong: #ffffff;
+  --line: rgba(16, 42, 66, 0.18);
+  --line-strong: rgba(16, 42, 66, 0.4);
+  --text: #0e1a26;
+  --text-dim: #58697c;
+  --accent: #0e7fae;
+  --accent-ink: #ffffff;
+  --accent-glow: rgba(14, 127, 174, 0.25);
+  --accent-2: #0d8a66;
+  --warn: #9a6206;
+  --warn-surface: rgba(154, 98, 6, 0.08);
+  --danger: #b3261e;
+  --user-bubble: rgba(14, 127, 174, 0.08);
+  --shadow: 0 14px 40px rgba(15, 30, 45, 0.12);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-quick: 0ms;
+    --dur-med: 0ms;
+    --dur-slow: 0ms;
+  }
+}
