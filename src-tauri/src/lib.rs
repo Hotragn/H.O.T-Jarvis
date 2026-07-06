@@ -1,0 +1,202 @@
+//! Thin Tauri adapter over the core modules. All real logic lives in
+//! `core/` (Tauri-free and unit-tested); commands here only translate
+//! between IPC and the core types.
+
+pub mod core;
+
+use crate::core::memory::{MemoryStore, StoredMessage};
+use crate::core::router::{onboarding_message, ChatMessage, ChatReply, Router, RouterConfig};
+use crate::core::tools::NotesTool;
+use std::path::PathBuf;
+use std::sync::Mutex;
+use tauri::Manager;
+
+struct AppState {
+    memory: Mutex<MemoryStore>,
+    router: Router,
+    notes: NotesTool,
+}
+
+#[derive(serde::Serialize)]
+struct ProviderStatus {
+    id: String,
+    configured: bool,
+    reachable: Option<bool>,
+    model: String,
+}
+
+#[derive(serde::Serialize)]
+struct Status {
+    providers: Vec<ProviderStatus>,
+    ready: bool,
+    onboarding: Option<String>,
+    message_count: u64,
+    fact_count: u64,
+}
+
+const SYSTEM_PROMPT: &str = "You are H.O.T-Jarvis, a calm, capable, local-first personal \
+assistant. Be concise and honest. You currently have one tool available to the user (local \
+notes) and a persistent memory of this conversation. If you are unsure of something, say so \
+plainly instead of guessing.";
+
+#[tauri::command]
+async fn get_status(state: tauri::State<'_, AppState>) -> Result<Status, String> {
+    let ollama_ok = state.router.ollama_reachable().await;
+    let cfg = state.router.config();
+    let providers = vec![
+        ProviderStatus {
+            id: "ollama".into(),
+            configured: true,
+            reachable: Some(ollama_ok),
+            model: cfg.ollama_model.clone(),
+        },
+        ProviderStatus {
+            id: "groq".into(),
+            configured: cfg.groq_api_key.is_some(),
+            reachable: None,
+            model: cfg.groq_model.clone(),
+        },
+        ProviderStatus {
+            id: "openrouter".into(),
+            configured: cfg.openrouter_api_key.is_some(),
+            reachable: None,
+            model: cfg.openrouter_model.clone(),
+        },
+    ];
+    let ready = ollama_ok || cfg.groq_api_key.is_some() || cfg.openrouter_api_key.is_some();
+    let (message_count, fact_count) = {
+        let mem = state.memory.lock().map_err(|e| e.to_string())?;
+        (
+            mem.message_count().map_err(|e| e.to_string())?,
+            mem.fact_count().map_err(|e| e.to_string())?,
+        )
+    };
+    Ok(Status {
+        providers,
+        ready,
+        onboarding: if ready {
+            None
+        } else {
+            Some(onboarding_message())
+        },
+        message_count,
+        fact_count,
+    })
+}
+
+#[tauri::command]
+async fn chat_send(state: tauri::State<'_, AppState>, text: String) -> Result<ChatReply, String> {
+    let trimmed = text.trim().to_string();
+    if trimmed.is_empty() {
+        return Err("empty message".into());
+    }
+    // Persist the user turn and build context, releasing the lock before I/O.
+    let mut context = vec![ChatMessage {
+        role: "system".into(),
+        content: SYSTEM_PROMPT.into(),
+    }];
+    {
+        let mem = state.memory.lock().map_err(|e| e.to_string())?;
+        mem.append_message("user", &trimmed)
+            .map_err(|e| e.to_string())?;
+        for m in mem.recent_messages(20).map_err(|e| e.to_string())? {
+            context.push(ChatMessage {
+                role: m.role,
+                content: m.content,
+            });
+        }
+    }
+    let reply = state
+        .router
+        .chat(&context)
+        .await
+        .map_err(|e| e.to_string())?;
+    {
+        let mem = state.memory.lock().map_err(|e| e.to_string())?;
+        mem.append_message("assistant", &reply.content)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(reply)
+}
+
+#[tauri::command]
+fn get_history(
+    state: tauri::State<'_, AppState>,
+    limit: Option<u32>,
+) -> Result<Vec<StoredMessage>, String> {
+    let mem = state.memory.lock().map_err(|e| e.to_string())?;
+    mem.recent_messages(limit.unwrap_or(200) as usize)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn save_note(
+    state: tauri::State<'_, AppState>,
+    title: String,
+    content: String,
+) -> Result<String, String> {
+    state
+        .notes
+        .save_note(&title, &content)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn list_notes(state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
+    state.notes.list_notes().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn read_note(state: tauri::State<'_, AppState>, name: String) -> Result<String, String> {
+    state.notes.read_note(&name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn export_memory(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let mem = state.memory.lock().map_err(|e| e.to_string())?;
+    mem.export_json().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn wipe_memory(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let mem = state.memory.lock().map_err(|e| e.to_string())?;
+    mem.wipe().map_err(|e| e.to_string())
+}
+
+fn resolve_data_dir(app: &tauri::App) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    match std::env::var("JARVIS_DATA_DIR") {
+        Ok(dir) if !dir.trim().is_empty() => Ok(PathBuf::from(dir.trim())),
+        _ => Ok(app.path().app_data_dir()?),
+    }
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    // Dev convenience: pick up a repo-root .env; harmless if absent.
+    let _ = dotenvy::dotenv();
+    tauri::Builder::default()
+        .setup(|app| {
+            let data_dir = resolve_data_dir(app)?;
+            let memory = MemoryStore::open(&data_dir.join("jarvis.sqlite3"))?;
+            let router = Router::new(RouterConfig::from_env());
+            let notes = NotesTool::new(&data_dir);
+            app.manage(AppState {
+                memory: Mutex::new(memory),
+                router,
+                notes,
+            });
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            get_status,
+            chat_send,
+            get_history,
+            save_note,
+            list_notes,
+            read_note,
+            export_memory,
+            wipe_memory
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
