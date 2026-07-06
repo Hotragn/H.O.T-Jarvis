@@ -163,7 +163,7 @@ export default function App() {
           key: `a-${Date.now()}`,
           role: "assistant",
           content: reply.content,
-          meta: `${reply.provider} · ${reply.model}`,
+          meta: `${reply.provider} · ${reply.model}${reply.cached ? " · cached" : ""}`,
         },
       ]);
       getStatus().then(setStatus).catch(() => {});

@@ -24,9 +24,9 @@ First-session bootstrap in progress on branch `feat/bootstrap-core`. Repo went f
 
 ## Next 3 tasks
 
-1. Router hardening: response caching + per-provider backoff (free-tier hygiene).
-2. Include events.jsonl in memory export; wire event log into the wipe story (user data completeness).
-3. Record the README GIF now that the HUD is real.
+1. Include events.jsonl in memory export; wire event log into the wipe story (user data completeness).
+2. Record the README GIF now that the HUD is real.
+3. Skill engine v0: manifest format + loader + every-skill-ships-a-test harness (§5.1, first hero feature).
 
 ## UI state (2026-07-06)
 

@@ -10,8 +10,8 @@ Machine-readable task queue. Status: `ready` | `in-progress` | `done` | `blocked
 - [x] `done` Persistent memory v0: SQLite (messages + kv profile) surviving restart, with migrations
 - [x] `done` Built-in tool v0: local notes in app data dir
 - [x] `done` Bare HUD: design tokens, dark/light themes, animated waveform, chat view
-- [ ] `ready` Verify `npm run tauri dev` end-to-end on Windows with a live Ollama model; record README GIF
-- [ ] `ready` Response caching + per-provider backoff in the router (free-tier hygiene)
+- [x] `done` Verify `npm run tauri dev` end-to-end on Windows with a live Ollama model (owner-verified 2026-07-06); README GIF still `ready`
+- [x] `done` Response caching + per-provider backoff in the router (free-tier hygiene)
 
 ## M1 — Hero feature foundations
 
