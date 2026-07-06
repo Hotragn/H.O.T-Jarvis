@@ -1,9 +1,17 @@
 //! Model-agnostic router: local Ollama first, then free cloud tiers.
 //! Never requires a paid API. With nothing configured it returns a
-//! structured onboarding message instead of a raw error.
+//! structured onboarding message instead of a raw error. Identical
+//! requests are served from a short-lived cache, and providers that
+//! rate-limit get skipped until their cooldown passes (§2 free-tier
+//! hygiene) — the local model is exempt from both penalties.
 
+use crate::core::reliability::{cache_key, CooldownTracker, ResponseCache};
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+const CACHE_CAPACITY: usize = 64;
+const CACHE_TTL: Duration = Duration::from_secs(600);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
@@ -16,6 +24,29 @@ pub struct ChatReply {
     pub content: String,
     pub provider: String,
     pub model: String,
+    /// True when served from the response cache instead of a fresh call.
+    pub cached: bool,
+}
+
+/// Provider-call failure with enough structure to drive backoff decisions.
+#[derive(Debug)]
+enum CallError {
+    /// HTTP status plus optional Retry-After seconds from the response.
+    Http {
+        status: u16,
+        retry_after: Option<u64>,
+        detail: String,
+    },
+    Other(String),
+}
+
+impl std::fmt::Display for CallError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CallError::Http { status, detail, .. } => write!(f, "http {status}: {detail}"),
+            CallError::Other(msg) => write!(f, "{msg}"),
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -119,6 +150,8 @@ fn extract_openai_content(v: &serde_json::Value) -> Option<String> {
 pub struct Router {
     config: RouterConfig,
     client: reqwest::Client,
+    cache: Mutex<ResponseCache<ChatReply>>,
+    cooldowns: Mutex<CooldownTracker>,
 }
 
 impl Router {
@@ -127,7 +160,12 @@ impl Router {
             .connect_timeout(Duration::from_secs(4))
             .build()
             .expect("failed to build http client");
-        Self { config, client }
+        Self {
+            config,
+            client,
+            cache: Mutex::new(ResponseCache::new(CACHE_CAPACITY, CACHE_TTL)),
+            cooldowns: Mutex::new(CooldownTracker::new()),
+        }
     }
 
     pub fn config(&self) -> &RouterConfig {
@@ -169,8 +207,32 @@ impl Router {
     }
 
     pub async fn chat(&self, messages: &[ChatMessage]) -> Result<ChatReply, RouterError> {
+        let key = cache_key(&serde_json::to_string(messages).unwrap_or_default());
+        if let Some(mut hit) = self
+            .cache
+            .lock()
+            .ok()
+            .and_then(|mut cache| cache.get(key, Instant::now()))
+        {
+            hit.cached = true;
+            return Ok(hit);
+        }
+
         let mut failures: Vec<String> = Vec::new();
         for provider in self.provider_plan() {
+            // Cloud providers on rate-limit cooldown get skipped; the local
+            // model is unlimited and never penalized.
+            if provider != ProviderId::Ollama {
+                let cooling = self
+                    .cooldowns
+                    .lock()
+                    .map(|c| !c.available(provider.name(), Instant::now()))
+                    .unwrap_or(false);
+                if cooling {
+                    failures.push(format!("{}: on rate-limit cooldown", provider.name()));
+                    continue;
+                }
+            }
             let result = match provider {
                 ProviderId::Ollama => self.chat_ollama(messages).await,
                 ProviderId::Groq => {
@@ -198,8 +260,34 @@ impl Router {
                 }
             };
             match result {
-                Ok(reply) => return Ok(reply),
-                Err(e) => failures.push(format!("{}: {e}", provider.name())),
+                Ok(reply) => {
+                    if let Ok(mut cooldowns) = self.cooldowns.lock() {
+                        cooldowns.reset(provider.name());
+                    }
+                    if let Ok(mut cache) = self.cache.lock() {
+                        cache.put(key, reply.clone(), Instant::now());
+                    }
+                    return Ok(reply);
+                }
+                Err(e) => {
+                    if provider != ProviderId::Ollama {
+                        if let CallError::Http {
+                            status: 429 | 503,
+                            retry_after,
+                            ..
+                        } = e
+                        {
+                            if let Ok(mut cooldowns) = self.cooldowns.lock() {
+                                cooldowns.penalize(
+                                    provider.name(),
+                                    retry_after.map(Duration::from_secs),
+                                    Instant::now(),
+                                );
+                            }
+                        }
+                    }
+                    failures.push(format!("{}: {e}", provider.name()));
+                }
             }
         }
         if self.has_cloud_fallback() {
@@ -211,7 +299,7 @@ impl Router {
         }
     }
 
-    async fn chat_ollama(&self, messages: &[ChatMessage]) -> Result<ChatReply, String> {
+    async fn chat_ollama(&self, messages: &[ChatMessage]) -> Result<ChatReply, CallError> {
         let url = format!(
             "{}/api/chat",
             self.config.ollama_base_url.trim_end_matches('/')
@@ -223,21 +311,27 @@ impl Router {
             .json(&ollama_body(&self.config.ollama_model, messages))
             .send()
             .await
-            .map_err(|e| format!("request failed: {e}"))?;
+            .map_err(|e| CallError::Other(format!("request failed: {e}")))?;
         let status = resp.status();
+        let retry_after = parse_retry_after(&resp);
         let body: serde_json::Value = resp
             .json()
             .await
-            .map_err(|e| format!("invalid response: {e}"))?;
+            .map_err(|e| CallError::Other(format!("invalid response: {e}")))?;
         if !status.is_success() {
-            return Err(format!("http {status}: {}", body["error"]));
+            return Err(CallError::Http {
+                status: status.as_u16(),
+                retry_after,
+                detail: body["error"].to_string(),
+            });
         }
-        let content =
-            extract_ollama_content(&body).ok_or_else(|| "no content in response".to_string())?;
+        let content = extract_ollama_content(&body)
+            .ok_or_else(|| CallError::Other("no content in response".to_string()))?;
         Ok(ChatReply {
             content,
             provider: ProviderId::Ollama.name().into(),
             model: self.config.ollama_model.clone(),
+            cached: false,
         })
     }
 
@@ -248,7 +342,7 @@ impl Router {
         model: &str,
         provider: ProviderId,
         messages: &[ChatMessage],
-    ) -> Result<ChatReply, String> {
+    ) -> Result<ChatReply, CallError> {
         let resp = self
             .client
             .post(url)
@@ -257,23 +351,36 @@ impl Router {
             .json(&openai_body(model, messages))
             .send()
             .await
-            .map_err(|e| format!("request failed: {e}"))?;
+            .map_err(|e| CallError::Other(format!("request failed: {e}")))?;
         let status = resp.status();
+        let retry_after = parse_retry_after(&resp);
         let body: serde_json::Value = resp
             .json()
             .await
-            .map_err(|e| format!("invalid response: {e}"))?;
+            .map_err(|e| CallError::Other(format!("invalid response: {e}")))?;
         if !status.is_success() {
-            return Err(format!("http {status}: {}", body["error"]));
+            return Err(CallError::Http {
+                status: status.as_u16(),
+                retry_after,
+                detail: body["error"].to_string(),
+            });
         }
-        let content =
-            extract_openai_content(&body).ok_or_else(|| "no content in response".to_string())?;
+        let content = extract_openai_content(&body)
+            .ok_or_else(|| CallError::Other("no content in response".to_string()))?;
         Ok(ChatReply {
             content,
             provider: provider.name().into(),
             model: model.to_string(),
+            cached: false,
         })
     }
+}
+
+fn parse_retry_after(resp: &reqwest::Response) -> Option<u64> {
+    resp.headers()
+        .get("retry-after")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().parse::<u64>().ok())
 }
 
 #[cfg(test)]
@@ -340,6 +447,65 @@ mod tests {
         assert!(text.contains("GROQ_API_KEY"));
         assert!(text.contains("OPENROUTER_API_KEY"));
         assert!(text.to_lowercase().contains("free"));
+    }
+
+    #[tokio::test]
+    async fn identical_request_is_served_from_cache_without_network() {
+        // Router points at a dead port, but the cache is pre-seeded with
+        // this exact request — chat must return the hit and mark it cached.
+        let config = RouterConfig {
+            ollama_base_url: "http://127.0.0.1:1".into(),
+            ..RouterConfig::default()
+        };
+        let router = Router::new(config);
+        let messages = msgs();
+        let key = cache_key(&serde_json::to_string(&messages).unwrap());
+        router.cache.lock().unwrap().put(
+            key,
+            ChatReply {
+                content: "from cache".into(),
+                provider: "ollama".into(),
+                model: "llama3.2".into(),
+                cached: false,
+            },
+            Instant::now(),
+        );
+
+        let reply = router.chat(&messages).await.expect("cache hit");
+        assert_eq!(reply.content, "from cache");
+        assert!(reply.cached, "hit must be marked as cached");
+
+        // A different request misses the cache and fails normally.
+        let other = vec![ChatMessage {
+            role: "user".into(),
+            content: "different".into(),
+        }];
+        assert!(router.chat(&other).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn cooled_down_cloud_provider_is_skipped() {
+        let config = RouterConfig {
+            ollama_base_url: "http://127.0.0.1:1".into(),
+            groq_api_key: Some("k".into()),
+            ..RouterConfig::default()
+        };
+        let router = Router::new(config);
+        router.cooldowns.lock().unwrap().penalize(
+            "groq",
+            Some(Duration::from_secs(3600)),
+            Instant::now(),
+        );
+
+        match router.chat(&msgs()).await {
+            Err(RouterError::AllProvidersFailed(detail)) => {
+                assert!(
+                    detail.contains("groq: on rate-limit cooldown"),
+                    "groq must be skipped, got: {detail}"
+                );
+            }
+            other => panic!("expected AllProvidersFailed, got {other:?}"),
+        }
     }
 
     #[tokio::test]

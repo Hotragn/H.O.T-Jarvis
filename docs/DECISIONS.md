@@ -2,6 +2,10 @@
 
 One short entry per meaningful decision. Newest at the top. Cite sources for ideas borrowed from papers or other projects (ideas only — implementations here are original).
 
+## 2026-07-06 — Router hardening: cache + cooldown, local model exempt
+
+Free-tier hygiene (§2) as pure clock-injected bookkeeping in `core/reliability.rs`: a TTL+capacity response cache (dedupes identical requests — double-sends and retries — 10 min TTL, 64 entries) and a per-provider cooldown tracker (exponential 30s→10min backoff, honors Retry-After) that the router consults before calling cloud providers. Deliberate asymmetry: **Ollama is exempt from both penalties** — local inference is unlimited and private, so penalizing it only hurts the user. Cache hits are marked `cached: true` and shown in the reply meta, because silently serving stale answers would violate the honesty principle. Provider call errors became structured (`CallError::Http{status, retry_after}`) so backoff decisions don't parse error strings.
+
 ## 2026-07-06 — Event log v0: JSONL, append-only, tolerant reader
 
 Chose plain JSONL over SQLite for the event log even though SQLite is already in the app: an append-only text file is trivially greppable, corruption-isolated per line (the reader skips bad lines instead of failing — tested with a simulated torn write), and matches the replay literature's framing of an immutable event stream. Ids are monotonic and resume across restarts. Logging is best-effort by design (`log_event` swallows errors): the log must never take the assistant down. Full chat text is logged because deterministic replay (§5.4) needs it; the file lives in the same local app-data dir as memory and is covered by the same export/wipe story (wiring the log into export is a follow-up). The EVENTS tab is read-only on purpose — no replay/undo buttons until the engine exists.
