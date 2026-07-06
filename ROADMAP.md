@@ -24,9 +24,13 @@ Machine-readable task queue. Status: `ready` | `in-progress` | `done` | `blocked
 
 ## M2 — Interface & voice
 
-- [ ] `ready` Command palette (Ctrl+K) + client-side routing with animated transitions
-- [ ] `ready` Skill library view with per-skill test status
-- [ ] `ready` Memory & reflection browser view
+- [x] `done` Command palette (Ctrl+K) + tab navigation (chat / notes / memory, Ctrl+1-3)
+- [x] `done` Live telemetry readouts: CPU sparkline, RAM, uptime, clock, memory counts (real data via sysinfo)
+- [x] `done` Memory browser view v0 with export-JSON and wipe controls
+- [x] `done` Notes view (create / list / read) over the notes tool
+- [ ] `ready` Skill library view with per-skill test status (needs skill engine, M1)
+- [ ] `ready` Reflection browser (needs reasoning-memory, M1)
+- [ ] `ready` Animated shared-element transitions between views
 - [ ] `ready` Voice v0: local STT (whisper.cpp/faster-whisper) + local TTS (Piper/Kokoro), optional and gracefully degrading
 - [ ] `ready` System tray + global hotkey + launch-at-login
 

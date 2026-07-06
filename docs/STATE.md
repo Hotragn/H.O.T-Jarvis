@@ -20,9 +20,13 @@ First-session bootstrap in progress on branch `feat/bootstrap-core`. Repo went f
 
 ## Next 3 tasks
 
-1. Verify `npm run tauri dev` end-to-end with a live Ollama model (needs Ollama installed) and record the README GIF.
+1. Verify `npm run tauri dev` end-to-end with a live Ollama model (needs Ollama installed) and record the README GIF — now shows tabs, palette, live telemetry.
 2. Router hardening: response caching + per-provider backoff (free-tier hygiene).
 3. Event log v0 (append-only JSONL) — groundwork for replay & undo (§5.4).
+
+## UI state (2026-07-06)
+
+Jarvis-style HUD shipped on `feat/bootstrap-core`: ArcCore visualizer, tab navigation (chat/notes/memory), Ctrl+K command palette, live telemetry (sysinfo CPU/RAM/uptime + memory counts + clock), notes and memory-browser views wired to the existing Rust commands. Browser preview shows standby placeholders by design; full data needs the Tauri shell.
 
 ## Blockers / waiting on owner
 

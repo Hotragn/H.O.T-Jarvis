@@ -9,12 +9,15 @@ use crate::core::router::{onboarding_message, ChatMessage, ChatReply, Router, Ro
 use crate::core::tools::NotesTool;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::Instant;
 use tauri::Manager;
 
 struct AppState {
     memory: Mutex<MemoryStore>,
     router: Router,
     notes: NotesTool,
+    system: Mutex<sysinfo::System>,
+    started: Instant,
 }
 
 #[derive(serde::Serialize)]
@@ -30,6 +33,17 @@ struct Status {
     providers: Vec<ProviderStatus>,
     ready: bool,
     onboarding: Option<String>,
+    message_count: u64,
+    fact_count: u64,
+}
+
+#[derive(serde::Serialize)]
+struct Telemetry {
+    cpu_percent: f32,
+    mem_used: u64,
+    mem_total: u64,
+    uptime_secs: u64,
+    note_count: usize,
     message_count: u64,
     fact_count: u64,
 }
@@ -151,6 +165,39 @@ fn read_note(state: tauri::State<'_, AppState>, name: String) -> Result<String, 
     state.notes.read_note(&name).map_err(|e| e.to_string())
 }
 
+/// Real machine and app vitals for the HUD's live readouts. First call
+/// reports 0% CPU (sysinfo needs a prior sample); it settles by the next poll.
+#[tauri::command]
+fn get_telemetry(state: tauri::State<'_, AppState>) -> Result<Telemetry, String> {
+    let (cpu_percent, mem_used, mem_total) = {
+        let mut sys = state.system.lock().map_err(|e| e.to_string())?;
+        sys.refresh_cpu_usage();
+        sys.refresh_memory();
+        (
+            sys.global_cpu_usage(),
+            sys.used_memory(),
+            sys.total_memory(),
+        )
+    };
+    let note_count = state.notes.list_notes().map_err(|e| e.to_string())?.len();
+    let (message_count, fact_count) = {
+        let mem = state.memory.lock().map_err(|e| e.to_string())?;
+        (
+            mem.message_count().map_err(|e| e.to_string())?,
+            mem.fact_count().map_err(|e| e.to_string())?,
+        )
+    };
+    Ok(Telemetry {
+        cpu_percent,
+        mem_used,
+        mem_total,
+        uptime_secs: state.started.elapsed().as_secs(),
+        note_count,
+        message_count,
+        fact_count,
+    })
+}
+
 #[tauri::command]
 fn export_memory(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let mem = state.memory.lock().map_err(|e| e.to_string())?;
@@ -184,6 +231,8 @@ pub fn run() {
                 memory: Mutex::new(memory),
                 router,
                 notes,
+                system: Mutex::new(sysinfo::System::new()),
+                started: Instant::now(),
             });
             Ok(())
         })
@@ -191,6 +240,7 @@ pub fn run() {
             get_status,
             chat_send,
             get_history,
+            get_telemetry,
             save_note,
             list_notes,
             read_note,

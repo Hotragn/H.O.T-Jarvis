@@ -2,6 +2,10 @@
 
 One short entry per meaningful decision. Newest at the top. Cite sources for ideas borrowed from papers or other projects (ideas only — implementations here are original).
 
+## 2026-07-06 — Multi-view HUD: tabs + palette, honest telemetry only
+
+Added tab navigation (chat / notes / memory, Ctrl+1-3) and a Ctrl+K command palette (subsequence-scored filtering, pure + unit-tested) instead of pulling in a router dependency — three views don't justify react-router yet; revisit when deep-linkable views land (§6.3). The reference wallpapers are full of gauges, so the rule for live data is: **only real numbers** — CPU/RAM/uptime come from a new `get_telemetry` command backed by `sysinfo`, plus actual message/fact/note counts and a wall clock. No invented readouts. New views surface the backend that already existed (notes tool, memory export/wipe) rather than faking future features (skill library, replay) — those stay in the roadmap until their engines exist.
+
 ## 2026-07-06 — HUD visual language: instrument panel, one glow
 
 Owner supplied film-Jarvis reference imagery (wallpapercave.com/jarvis-wallpapers). Reading the references closely: they are *restrained* — mostly monochrome steel hairlines and tiny uppercase mono labels, with exactly one bright element (the circular core). Adopted as a hard rule: glow is reserved for the arc-reactor core (canvas `ArcCore`, the app's signature element — its offline/idle/thinking states are the primary trust signal) and everything else stays hairlines and type. Light theme reinterprets the same instrument as a blueprint on paper rather than a dimmed dark theme. System fonts only (offline-first, no font downloads). Original implementation; imagery used as mood reference only.
