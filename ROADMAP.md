@@ -18,7 +18,8 @@ Machine-readable task queue. Status: `ready` | `in-progress` | `done` | `blocked
 - [x] `done` Event log v0: append-only JSONL of every action (chat, notes, wipes, startups) + read-only timeline tab (§5.4 groundwork)
 - [ ] `ready` Replay v1: deterministic re-run of a session from the event log; undo for reversible actions (§5.4)
 - [ ] `ready` Memory: local vector store for semantic recall (FAISS/Chroma/Qdrant equivalent that's Rust-friendly, e.g. sqlite-vec)
-- [ ] `ready` Skill engine v0: skill manifest format + loader + "every skill ships a test" harness (§5.1)
+- [x] `done` Skill engine v0: manifest + versioned Rhai skills + "every skill ships a test" harness; failing skills flagged and refused (§5.1)
+- [ ] `ready` Skill engine v1: let the assistant author skills from chat (LLM writes code + test, engine validates)
 - [ ] `ready` Confidence estimate v0: pre-action self-rating surfaced in the HUD (§5.3)
 - [ ] `blocked (needs event log)` Replay timeline UI v0 (§5.4)
 - [ ] `ready` Reflection pass v0: periodic summarization of reasoning traces into memory (§5.2)
@@ -29,7 +30,7 @@ Machine-readable task queue. Status: `ready` | `in-progress` | `done` | `blocked
 - [x] `done` Live telemetry readouts: CPU sparkline, RAM, uptime, clock, memory counts (real data via sysinfo)
 - [x] `done` Memory browser view v0 with export-JSON and wipe controls
 - [x] `done` Notes view (create / list / read) over the notes tool
-- [ ] `ready` Skill library view with per-skill test status (needs skill engine, M1)
+- [x] `done` Skill library view with per-skill test status, create form, run panel
 - [ ] `ready` Reflection browser (needs reasoning-memory, M1)
 - [ ] `ready` Animated shared-element transitions between views
 - [ ] `ready` Voice v0: local STT (whisper.cpp/faster-whisper) + local TTS (Piper/Kokoro), optional and gracefully degrading

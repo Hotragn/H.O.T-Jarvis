@@ -26,6 +26,20 @@ export function summarizeEvent(event: AppEvent): string {
       return truncate(`failed: ${str(p.error)}`);
     case "note.saved":
       return `saved note "${str(p.slug)}"`;
+    case "skill.saved": {
+      const status =
+        (p.test_status as { status?: string } | undefined)?.status ?? "?";
+      return `saved skill "${str(p.name)}" v${p.version} · test ${status}`;
+    }
+    case "skill.tested": {
+      const status =
+        (p.test_status as { status?: string } | undefined)?.status ?? "?";
+      return `re-tested skill "${str(p.name)}" · ${status}`;
+    }
+    case "skill.run":
+      return p.ok
+        ? `ran skill "${str(p.name)}"`
+        : `skill "${str(p.name)}" refused/failed: ${str(p.error)}`;
     case "memory.wiped":
       return "all remembered messages and facts erased";
     default:

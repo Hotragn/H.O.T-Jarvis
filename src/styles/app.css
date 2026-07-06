@@ -549,6 +549,54 @@ body {
   margin: var(--space-2) 0 0;
 }
 
+/* --- skill library --- */
+.skill-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.skill-version {
+  color: var(--text-dim);
+  font-size: 9px;
+}
+
+.skill-badge {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.skill-badge[data-state="passed"] {
+  color: var(--accent-2);
+}
+
+.skill-badge[data-state="failed"] {
+  color: var(--warn);
+}
+
+.skill-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.code-area {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  min-height: 110px;
+}
+
+.skill-output {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
 /* --- shared panel bits --- */
 .panel-title-row {
   display: flex;
