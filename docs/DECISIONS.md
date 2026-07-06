@@ -2,6 +2,10 @@
 
 One short entry per meaningful decision. Newest at the top. Cite sources for ideas borrowed from papers or other projects (ideas only — implementations here are original).
 
+## 2026-07-06 — Event log v0: JSONL, append-only, tolerant reader
+
+Chose plain JSONL over SQLite for the event log even though SQLite is already in the app: an append-only text file is trivially greppable, corruption-isolated per line (the reader skips bad lines instead of failing — tested with a simulated torn write), and matches the replay literature's framing of an immutable event stream. Ids are monotonic and resume across restarts. Logging is best-effort by design (`log_event` swallows errors): the log must never take the assistant down. Full chat text is logged because deterministic replay (§5.4) needs it; the file lives in the same local app-data dir as memory and is covered by the same export/wipe story (wiring the log into export is a follow-up). The EVENTS tab is read-only on purpose — no replay/undo buttons until the engine exists.
+
 ## 2026-07-06 — Multi-view HUD: tabs + palette, honest telemetry only
 
 Added tab navigation (chat / notes / memory, Ctrl+1-3) and a Ctrl+K command palette (subsequence-scored filtering, pure + unit-tested) instead of pulling in a router dependency — three views don't justify react-router yet; revisit when deep-linkable views land (§6.3). The reference wallpapers are full of gauges, so the rule for live data is: **only real numbers** — CPU/RAM/uptime come from a new `get_telemetry` command backed by `sysinfo`, plus actual message/fact/note counts and a wall clock. No invented readouts. New views surface the backend that already existed (notes tool, memory export/wipe) rather than faking future features (skill library, replay) — those stay in the roadmap until their engines exist.

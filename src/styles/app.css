@@ -655,6 +655,46 @@ body {
   white-space: nowrap;
 }
 
+/* --- events view --- */
+.events-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.event-row {
+  display: grid;
+  grid-template-columns: 44px 110px 1fr auto;
+  gap: var(--space-2);
+  align-items: baseline;
+  padding: 7px 4px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.event-id {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-dim);
+}
+
+.event-kind {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
+
+.event-row[data-domain="chat"] .event-kind {
+  color: var(--accent);
+}
+
+.event-row[data-domain="memory"] .event-kind {
+  color: var(--warn);
+}
+
 /* --- command palette --- */
 .palette-veil {
   position: fixed;
