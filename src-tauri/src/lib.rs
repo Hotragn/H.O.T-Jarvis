@@ -7,6 +7,7 @@ pub mod core;
 use crate::core::eventlog::{Event, EventLog};
 use crate::core::memory::{MemoryStore, StoredMessage};
 use crate::core::router::{onboarding_message, ChatMessage, ChatReply, Router, RouterConfig};
+use crate::core::skills::{SkillEngine, SkillManifest};
 use crate::core::tools::NotesTool;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -17,6 +18,7 @@ struct AppState {
     memory: Mutex<MemoryStore>,
     router: Router,
     notes: NotesTool,
+    skills: SkillEngine,
     events: Mutex<EventLog>,
     system: Mutex<sysinfo::System>,
     started: Instant,
@@ -234,6 +236,72 @@ fn get_telemetry(state: tauri::State<'_, AppState>) -> Result<Telemetry, String>
 }
 
 #[tauri::command]
+fn save_skill(
+    state: tauri::State<'_, AppState>,
+    name: String,
+    description: String,
+    code: String,
+    test: String,
+) -> Result<SkillManifest, String> {
+    let manifest = state
+        .skills
+        .save_skill(&name, &description, &code, &test)
+        .map_err(|e| e.to_string())?;
+    log_event(
+        &state,
+        "skill.saved",
+        serde_json::json!({
+            "name": manifest.name,
+            "version": manifest.version,
+            "test_status": manifest.test_status,
+        }),
+    );
+    Ok(manifest)
+}
+
+#[tauri::command]
+fn list_skills(state: tauri::State<'_, AppState>) -> Result<Vec<SkillManifest>, String> {
+    state.skills.list_skills().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn test_skill(state: tauri::State<'_, AppState>, name: String) -> Result<SkillManifest, String> {
+    let manifest = state.skills.test_skill(&name).map_err(|e| e.to_string())?;
+    log_event(
+        &state,
+        "skill.tested",
+        serde_json::json!({ "name": manifest.name, "test_status": manifest.test_status }),
+    );
+    Ok(manifest)
+}
+
+#[tauri::command]
+fn run_skill(
+    state: tauri::State<'_, AppState>,
+    name: String,
+    input: String,
+) -> Result<String, String> {
+    match state.skills.run_skill(&name, &input) {
+        Ok(output) => {
+            log_event(
+                &state,
+                "skill.run",
+                serde_json::json!({ "name": name, "ok": true }),
+            );
+            Ok(output)
+        }
+        Err(e) => {
+            log_event(
+                &state,
+                "skill.run",
+                serde_json::json!({ "name": name, "ok": false, "error": e.to_string() }),
+            );
+            Err(e.to_string())
+        }
+    }
+}
+
+#[tauri::command]
 fn export_memory(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let mem = state.memory.lock().map_err(|e| e.to_string())?;
     mem.export_json().map_err(|e| e.to_string())
@@ -274,6 +342,7 @@ pub fn run() {
             let memory = MemoryStore::open(&data_dir.join("jarvis.sqlite3"))?;
             let router = Router::new(RouterConfig::from_env());
             let notes = NotesTool::new(&data_dir);
+            let skills = SkillEngine::new(&data_dir);
             let mut events = EventLog::open(&data_dir.join("events.jsonl"))?;
             let _ = events.append(
                 "app.started",
@@ -283,6 +352,7 @@ pub fn run() {
                 memory: Mutex::new(memory),
                 router,
                 notes,
+                skills,
                 events: Mutex::new(events),
                 system: Mutex::new(sysinfo::System::new()),
                 started: Instant::now(),
@@ -298,6 +368,10 @@ pub fn run() {
             save_note,
             list_notes,
             read_note,
+            save_skill,
+            list_skills,
+            test_skill,
+            run_skill,
             export_memory,
             wipe_memory
         ])

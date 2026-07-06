@@ -49,6 +49,19 @@ export interface AppEvent {
   payload: Record<string, unknown>;
 }
 
+export type TestStatus =
+  | { status: "passed" }
+  | { status: "failed"; detail: string };
+
+export interface SkillManifest {
+  name: string;
+  version: number;
+  description: string;
+  created_at: number;
+  updated_at: number;
+  test_status: TestStatus;
+}
+
 export const inTauri =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -103,6 +116,31 @@ export async function readNote(name: string): Promise<string> {
 export async function saveNote(title: string, content: string): Promise<string> {
   if (!inTauri) throw new Error("No backend in the browser preview.");
   return invoke<string>("save_note", { title, content });
+}
+
+export async function listSkills(): Promise<SkillManifest[]> {
+  if (!inTauri) return [];
+  return invoke<SkillManifest[]>("list_skills");
+}
+
+export async function saveSkill(
+  name: string,
+  description: string,
+  code: string,
+  test: string,
+): Promise<SkillManifest> {
+  if (!inTauri) throw new Error("No backend in the browser preview.");
+  return invoke<SkillManifest>("save_skill", { name, description, code, test });
+}
+
+export async function testSkill(name: string): Promise<SkillManifest> {
+  if (!inTauri) throw new Error("No backend in the browser preview.");
+  return invoke<SkillManifest>("test_skill", { name });
+}
+
+export async function runSkill(name: string, input: string): Promise<string> {
+  if (!inTauri) throw new Error("No backend in the browser preview.");
+  return invoke<string>("run_skill", { name, input });
 }
 
 export async function exportMemory(): Promise<unknown> {

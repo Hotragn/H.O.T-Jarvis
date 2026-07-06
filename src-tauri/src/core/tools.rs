@@ -5,6 +5,32 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Lowercase, alphanumerics and single hyphens only, capped at 64 chars.
+/// Shared by everything that turns a user-supplied name into a filename —
+/// the slug can never contain path separators, so traversal is impossible.
+pub(crate) fn slugify(title: &str) -> Option<String> {
+    let mut out = String::new();
+    let mut last_hyphen = true; // suppress leading hyphen
+    for c in title.chars().flat_map(char::to_lowercase) {
+        if c.is_ascii_alphanumeric() {
+            out.push(c);
+            last_hyphen = false;
+        } else if !last_hyphen {
+            out.push('-');
+            last_hyphen = true;
+        }
+        if out.len() >= 64 {
+            break;
+        }
+    }
+    let out = out.trim_end_matches('-').to_string();
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ToolError {
     #[error("note title must contain at least one letter or digit")]
@@ -33,28 +59,8 @@ impl NotesTool {
         &self.notes_dir
     }
 
-    /// Lowercase, alphanumerics and single hyphens only, capped at 64 chars.
     fn slug(title: &str) -> Option<String> {
-        let mut out = String::new();
-        let mut last_hyphen = true; // suppress leading hyphen
-        for c in title.chars().flat_map(char::to_lowercase) {
-            if c.is_ascii_alphanumeric() {
-                out.push(c);
-                last_hyphen = false;
-            } else if !last_hyphen {
-                out.push('-');
-                last_hyphen = true;
-            }
-            if out.len() >= 64 {
-                break;
-            }
-        }
-        let out = out.trim_end_matches('-').to_string();
-        if out.is_empty() {
-            None
-        } else {
-            Some(out)
-        }
+        slugify(title)
     }
 
     fn path_for(&self, slug: &str) -> PathBuf {

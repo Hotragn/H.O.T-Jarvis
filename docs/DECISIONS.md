@@ -2,6 +2,10 @@
 
 One short entry per meaningful decision. Newest at the top. Cite sources for ideas borrowed from papers or other projects (ideas only — implementations here are original).
 
+## 2026-07-06 — Skill engine v0: Rhai as the skill runtime
+
+Skills (§5.1) are Rhai scripts, not Python/WASM/JS: Rhai is pure Rust (no system deps, compiles in CI unchanged), sandboxed **by construction** (scripts see only language built-ins — no fs, no network, nothing we don't register), and hard-capped per execution (200k operations, bounded call depth / string / collection sizes) so a runaway loop terminates instead of hanging the assistant — there's a test proving it. Contract: `fn run(input)` plus a bundled `fn test()`; the test runs on every save and re-save; a failing skill is *flagged and refused at run time*, never used blindly (Reflexion-style refinement loop). Versions are integers; the previous source is archived to `history/v<N>/` on every update — cheap provenance for the future replay/undo story. Idea credits: Voyager's skill library, MUSE-Autoskill, Reflexion. v1 (LLM authors skills from chat) is next in ROADMAP; v0 deliberately ships the engine + manual authoring UI so the harness is proven before the model writes code into it.
+
 ## 2026-07-06 — Router hardening: cache + cooldown, local model exempt
 
 Free-tier hygiene (§2) as pure clock-injected bookkeeping in `core/reliability.rs`: a TTL+capacity response cache (dedupes identical requests — double-sends and retries — 10 min TTL, 64 entries) and a per-provider cooldown tracker (exponential 30s→10min backoff, honors Retry-After) that the router consults before calling cloud providers. Deliberate asymmetry: **Ollama is exempt from both penalties** — local inference is unlimited and private, so penalizing it only hurts the user. Cache hits are marked `cached: true` and shown in the reply meta, because silently serving stale answers would violate the honesty principle. Provider call errors became structured (`CallError::Http{status, retry_after}`) so backoff decisions don't parse error strings.
