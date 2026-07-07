@@ -133,6 +133,17 @@ export async function saveSkill(
   return invoke<SkillManifest>("save_skill", { name, description, code, test });
 }
 
+export interface AuthoringOutcome {
+  manifest: SkillManifest;
+  attempts: number;
+  passed: boolean;
+}
+
+export async function authorSkill(request: string): Promise<AuthoringOutcome> {
+  if (!inTauri) throw new Error("No backend in the browser preview.");
+  return invoke<AuthoringOutcome>("author_skill", { request });
+}
+
 export async function testSkill(name: string): Promise<SkillManifest> {
   if (!inTauri) throw new Error("No backend in the browser preview.");
   return invoke<SkillManifest>("test_skill", { name });

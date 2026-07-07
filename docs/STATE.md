@@ -24,9 +24,9 @@ First-session bootstrap in progress on branch `feat/bootstrap-core`. Repo went f
 
 ## Next 3 tasks
 
-1. Skill engine v1: assistant authors skills from chat — LLM writes code + bundled test, engine validates and flags (§5.1 payoff).
-2. Include events.jsonl in memory export; wire event log into the wipe story (user data completeness).
-3. Record the README GIF now that the HUD is real (chat + skills + events tabs).
+1. Include events.jsonl in memory export; wire event log into the wipe story (user data completeness).
+2. Record the README GIF now that the HUD is real (chat + skills + authoring + events).
+3. Reflective reasoning-memory v0 (§5.2): store reasoning traces + outcomes, periodic reflection pass.
 
 ## UI state (2026-07-06)
 

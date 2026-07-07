@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  authorSkill,
   listSkills,
   runSkill,
   saveSkill,
@@ -31,6 +32,8 @@ export default function SkillsView() {
   const [runInput, setRunInput] = useState("");
   const [runOutput, setRunOutput] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [authorRequest, setAuthorRequest] = useState("");
+  const [authoring, setAuthoring] = useState(false);
 
   const refresh = useCallback(() => {
     listSkills()
@@ -61,6 +64,30 @@ export default function SkillsView() {
       );
     } catch (e) {
       setNotice(String(e));
+    }
+  };
+
+  const author = async () => {
+    const request = authorRequest.trim();
+    if (!request || authoring) return;
+    setAuthoring(true);
+    setNotice(null);
+    try {
+      const outcome = await authorSkill(request);
+      setAuthorRequest("");
+      refresh();
+      setSelected(outcome.manifest.name);
+      setCreating(false);
+      setRunOutput(null);
+      setNotice(
+        outcome.passed
+          ? `Jarvis built "${outcome.manifest.name}" v${outcome.manifest.version} — test passed on attempt ${outcome.attempts}.`
+          : `Jarvis tried ${outcome.attempts} times; "${outcome.manifest.name}" is saved but flagged. Refine it or re-ask.`,
+      );
+    } catch (e) {
+      setNotice(String(e));
+    } finally {
+      setAuthoring(false);
     }
   };
 
@@ -131,6 +158,36 @@ export default function SkillsView() {
       </aside>
 
       <section className="notes-body">
+        <form
+          className="composer"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void author();
+          }}
+        >
+          <input
+            className="chat-input"
+            value={authorRequest}
+            placeholder="Ask Jarvis to build a skill… e.g. count the words in the input"
+            aria-label="skill request"
+            disabled={authoring}
+            onChange={(e) => setAuthorRequest(e.target.value)}
+          />
+          <button
+            className="send-btn"
+            type="submit"
+            disabled={authoring || !authorRequest.trim()}
+          >
+            {authoring ? "Building…" : "Author"}
+          </button>
+        </form>
+        {authoring && (
+          <p className="panel-hint">
+            Jarvis is writing code and a test, then proving it works. On a
+            local model this can take a minute — failed drafts get refined
+            automatically.
+          </p>
+        )}
         {notice && (
           <div className="msg" data-role="system">
             {notice}
