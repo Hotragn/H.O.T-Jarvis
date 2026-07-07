@@ -24,9 +24,9 @@ First-session bootstrap in progress on branch `feat/bootstrap-core`. Repo went f
 
 ## Next 3 tasks
 
-1. Include events.jsonl in memory export; wire event log into the wipe story (user data completeness).
-2. Record the README GIF now that the HUD is real (chat + skills + authoring + events).
-3. Reflective reasoning-memory v0 (§5.2): store reasoning traces + outcomes, periodic reflection pass.
+1. Reflective reasoning-memory v0 (§5.2): store reasoning traces + outcomes, periodic reflection pass.
+2. Record the README GIF now that the HUD is real (chat + skills + authoring + events) — needs the owner or a screen-recording tool.
+3. Confidence estimate v0 (§5.3): pre-action self-rating surfaced in the HUD gauge.
 
 ## UI state (2026-07-06)
 

@@ -98,6 +98,17 @@ impl EventLog {
     pub fn count(&self) -> Result<usize, EventLogError> {
         Ok(read_events(&self.path).len())
     }
+
+    /// Erases the log and restarts the id sequence. The log is append-only
+    /// in operation, but the user's right to wipe their data outranks that:
+    /// chat text lives in these lines too.
+    pub fn wipe(&mut self) -> Result<(), EventLogError> {
+        if self.path.exists() {
+            std::fs::write(&self.path, b"")?;
+        }
+        self.next_id = 1;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -155,6 +166,24 @@ mod tests {
         assert_eq!(log.count().unwrap(), 1);
         let e = log.append("after", serde_json::json!({})).unwrap();
         assert_eq!(e.id, 2, "id continues past the corrupt line");
+    }
+
+    #[test]
+    fn wipe_erases_and_restarts_id_sequence() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("w.jsonl");
+        let mut log = EventLog::open(&path).unwrap();
+        log.append("a", serde_json::json!({})).unwrap();
+        log.append("b", serde_json::json!({})).unwrap();
+
+        log.wipe().unwrap();
+        assert_eq!(log.count().unwrap(), 0);
+        let first_after = log.append("fresh", serde_json::json!({})).unwrap();
+        assert_eq!(first_after.id, 1, "id sequence restarts after wipe");
+
+        // Reopen agrees with the wiped state.
+        let reopened = EventLog::open(&path).unwrap();
+        assert_eq!(reopened.count().unwrap(), 1);
     }
 
     #[test]
