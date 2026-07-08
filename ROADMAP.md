@@ -42,6 +42,11 @@ Machine-readable task queue. Status: `ready` | `in-progress` | `done` | `blocked
 - [ ] `blocked (needs CI + guardrails proven)` Auto mode: scheduler loop over this roadmap with resource caps, kill switch, dry-run gates
 - [ ] `ready` Research-to-feature loop: scan agent papers, propose issues
 
+## Chores
+
+- [x] `done` Export completeness: events + notes in the memory export; wipe also clears the event log
+- [ ] `ready` Note deletion in the notes view
+
 ## Backlog / open problems
 
 - Selective forgetting in memory (differentiator, hard)

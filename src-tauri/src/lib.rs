@@ -393,17 +393,47 @@ fn run_skill(
     }
 }
 
+/// Everything the assistant knows, in one JSON file: structured memory,
+/// the full event log, and the notes. The user's data is theirs to take.
 #[tauri::command]
 fn export_memory(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let mem = state.memory.lock().map_err(|e| e.to_string())?;
-    mem.export_json().map_err(|e| e.to_string())
+    let mut dump = {
+        let mem = state.memory.lock().map_err(|e| e.to_string())?;
+        mem.export_json().map_err(|e| e.to_string())?
+    };
+    let events = {
+        let log = state.events.lock().map_err(|e| e.to_string())?;
+        log.tail(usize::MAX / 2).map_err(|e| e.to_string())?
+    };
+    let notes: Vec<serde_json::Value> = state
+        .notes
+        .list_notes()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter_map(|name| {
+            state
+                .notes
+                .read_note(&name)
+                .ok()
+                .map(|content| serde_json::json!({ "name": name, "content": content }))
+        })
+        .collect();
+    dump["events"] = serde_json::to_value(events).map_err(|e| e.to_string())?;
+    dump["notes"] = serde_json::Value::Array(notes);
+    Ok(dump)
 }
 
+/// Wipes structured memory AND the event log (chat text lives there too).
+/// Notes are documents, not memory — they stay until deleted explicitly.
 #[tauri::command]
 fn wipe_memory(state: tauri::State<'_, AppState>) -> Result<(), String> {
     {
         let mem = state.memory.lock().map_err(|e| e.to_string())?;
         mem.wipe().map_err(|e| e.to_string())?;
+    }
+    {
+        let mut events = state.events.lock().map_err(|e| e.to_string())?;
+        events.wipe().map_err(|e| e.to_string())?;
     }
     log_event(&state, "memory.wiped", serde_json::json!({}));
     Ok(())

@@ -47,7 +47,7 @@ export default function MemoryView({ messageCount, factCount, onWiped }: Props) 
   const doWipe = async () => {
     if (
       !window.confirm(
-        "Erase all remembered messages and facts? This cannot be undone.",
+        "Erase all remembered messages, facts, and the event log? Notes are kept. This cannot be undone.",
       )
     )
       return;
