@@ -35,11 +35,13 @@ Hard rules:
 - NEVER use ${...} interpolation inside double-quoted strings — it is not Rhai. Build strings with + or return expressions directly.
 - Escape all double quotes inside code and test for valid JSON."#;
 
-pub fn authoring_messages(request: &str) -> Vec<ChatMessage> {
+/// `lessons` are skill-related insights from the reflection pass (§5.2) —
+/// the assistant's own past authoring mistakes ride along as guidance.
+pub fn authoring_messages(request: &str, lessons: &[String]) -> Vec<ChatMessage> {
     vec![
         ChatMessage {
             role: "system".into(),
-            content: AUTHORING_SYSTEM.into(),
+            content: crate::core::reflection::with_lessons(AUTHORING_SYSTEM, lessons),
         },
         ChatMessage {
             role: "user".into(),
@@ -129,10 +131,19 @@ mod tests {
 
     #[test]
     fn authoring_messages_carry_contract_and_request() {
-        let messages = authoring_messages("reverse the input string");
+        let messages = authoring_messages("reverse the input string", &[]);
         assert_eq!(messages[0].role, "system");
         assert!(messages[0].content.contains("ONLY one JSON object"));
         assert!(messages[1].content.contains("reverse the input string"));
+    }
+
+    #[test]
+    fn authoring_messages_carry_learned_lessons() {
+        let lessons = vec!["never use ${} interpolation".to_string()];
+        let messages = authoring_messages("anything", &lessons);
+        assert!(messages[0]
+            .content
+            .contains("- never use ${} interpolation"));
     }
 
     #[test]

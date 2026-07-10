@@ -9,6 +9,7 @@ import {
   getHistory,
   getStatus,
   getTelemetry,
+  reflectIfDue,
   type Status,
   type Telemetry,
 } from "./lib/ipc";
@@ -171,6 +172,9 @@ export default function App() {
         },
       ]);
       getStatus().then(setStatus).catch(() => {});
+      // Periodic reflection: fires for real only when enough conversation
+      // has accumulated since the last pass.
+      reflectIfDue().catch(() => {});
     } catch (err) {
       setItems((prev) => [
         ...prev,

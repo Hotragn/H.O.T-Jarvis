@@ -154,6 +154,29 @@ export async function runSkill(name: string, input: string): Promise<string> {
   return invoke<string>("run_skill", { name, input });
 }
 
+export interface Insight {
+  id: number;
+  kind: string;
+  content: string;
+  source: string;
+  created_at: number;
+}
+
+export async function listInsights(limit = 50): Promise<Insight[]> {
+  if (!inTauri) return [];
+  return invoke<Insight[]>("list_insights", { limit });
+}
+
+export async function reflectNow(): Promise<Insight[]> {
+  if (!inTauri) throw new Error("No backend in the browser preview.");
+  return invoke<Insight[]>("reflect_now");
+}
+
+export async function reflectIfDue(): Promise<number | null> {
+  if (!inTauri) return null;
+  return invoke<number | null>("reflect_if_due");
+}
+
 export async function exportMemory(): Promise<unknown> {
   if (!inTauri) throw new Error("No backend in the browser preview.");
   return invoke<unknown>("export_memory");

@@ -8,7 +8,11 @@ use crate::core::authoring::{
     authoring_messages, parse_skill_draft, refinement_message, MAX_ATTEMPTS,
 };
 use crate::core::eventlog::{Event, EventLog};
-use crate::core::memory::{MemoryStore, StoredMessage};
+use crate::core::memory::{Insight, MemoryStore, StoredMessage};
+use crate::core::reflection::{
+    digest_events, parse_insights, reflection_messages, with_lessons, INSIGHTS_IN_PROMPT,
+    REFLECT_EVERY_MESSAGES,
+};
 use crate::core::router::{onboarding_message, ChatMessage, ChatReply, Router, RouterConfig};
 use crate::core::skills::{SkillEngine, SkillManifest};
 use crate::core::tools::NotesTool;
@@ -119,14 +123,21 @@ async fn chat_send(state: tauri::State<'_, AppState>, text: String) -> Result<Ch
         return Err("empty message".into());
     }
     // Persist the user turn and build context, releasing the lock before I/O.
-    let mut context = vec![ChatMessage {
-        role: "system".into(),
-        content: SYSTEM_PROMPT.into(),
-    }];
+    let mut context = Vec::new();
     {
         let mem = state.memory.lock().map_err(|e| e.to_string())?;
         mem.append_message("user", &trimmed)
             .map_err(|e| e.to_string())?;
+        let lessons: Vec<String> = mem
+            .recent_insights(INSIGHTS_IN_PROMPT)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|i| i.content)
+            .collect();
+        context.push(ChatMessage {
+            role: "system".into(),
+            content: with_lessons(SYSTEM_PROMPT, &lessons),
+        });
         for m in mem.recent_messages(20).map_err(|e| e.to_string())? {
             context.push(ChatMessage {
                 role: m.role,
@@ -282,7 +293,17 @@ async fn author_skill(
     if trimmed.is_empty() {
         return Err("describe what the skill should do".into());
     }
-    let mut conversation = authoring_messages(&trimmed);
+    let skill_lessons: Vec<String> = {
+        let mem = state.memory.lock().map_err(|e| e.to_string())?;
+        mem.recent_insights(10)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .filter(|i| i.kind == "skill")
+            .take(INSIGHTS_IN_PROMPT)
+            .map(|i| i.content)
+            .collect()
+    };
+    let mut conversation = authoring_messages(&trimmed, &skill_lessons);
     let mut last_error = String::new();
     let mut saved: Option<SkillManifest> = None;
 
@@ -393,6 +414,106 @@ fn run_skill(
     }
 }
 
+/// Reflection pass (§5.2): digest the events since the last pass, ask the
+/// model for lessons, store them as insights. Returns the new insights.
+async fn run_reflection(state: &AppState) -> Result<Vec<Insight>, String> {
+    // Gather fresh events past the watermark; hold no lock across awaits.
+    let (fresh, watermark) = {
+        let last: u64 = {
+            let mem = state.memory.lock().map_err(|e| e.to_string())?;
+            mem.get_fact("reflection.last_event_id")
+                .map_err(|e| e.to_string())?
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0)
+        };
+        let events = {
+            let log = state.events.lock().map_err(|e| e.to_string())?;
+            log.tail(300).map_err(|e| e.to_string())?
+        };
+        let fresh: Vec<Event> = events.into_iter().filter(|e| e.id > last).collect();
+        let watermark = fresh.iter().map(|e| e.id).max().unwrap_or(last);
+        (fresh, watermark)
+    };
+    if fresh.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let digest = digest_events(&fresh);
+    let reply = state
+        .router
+        .chat(&reflection_messages(&digest))
+        .await
+        .map_err(|e| e.to_string())?;
+    let drafts = parse_insights(&reply.content).unwrap_or_default();
+
+    let mut stored = Vec::new();
+    {
+        let mem = state.memory.lock().map_err(|e| e.to_string())?;
+        let source = format!("events ..{watermark}");
+        for draft in &drafts {
+            let id = mem
+                .add_insight(&draft.kind, &draft.content, &source)
+                .map_err(|e| e.to_string())?;
+            stored.push(Insight {
+                id,
+                kind: draft.kind.clone(),
+                content: draft.content.clone(),
+                source: source.clone(),
+                created_at: 0,
+            });
+        }
+        // Advance the watermark even on an empty harvest so the same events
+        // aren't re-digested forever.
+        mem.set_fact("reflection.last_event_id", &watermark.to_string())
+            .map_err(|e| e.to_string())?;
+        let count = mem.message_count().map_err(|e| e.to_string())?;
+        mem.set_fact("reflection.last_message_count", &count.to_string())
+            .map_err(|e| e.to_string())?;
+    }
+    log_event(
+        state,
+        "memory.reflected",
+        serde_json::json!({ "insights": stored.len(), "events_digested": fresh.len() }),
+    );
+    Ok(stored)
+}
+
+/// Manual "Reflect now" from the memory view.
+#[tauri::command]
+async fn reflect_now(state: tauri::State<'_, AppState>) -> Result<Vec<Insight>, String> {
+    run_reflection(&state).await
+}
+
+/// Periodic trigger: the frontend calls this after chat turns; reflection
+/// only actually runs once enough new conversation has accumulated.
+#[tauri::command]
+async fn reflect_if_due(state: tauri::State<'_, AppState>) -> Result<Option<usize>, String> {
+    let due = {
+        let mem = state.memory.lock().map_err(|e| e.to_string())?;
+        let count = mem.message_count().map_err(|e| e.to_string())?;
+        let last: u64 = mem
+            .get_fact("reflection.last_message_count")
+            .map_err(|e| e.to_string())?
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        count.saturating_sub(last) >= REFLECT_EVERY_MESSAGES
+    };
+    if !due {
+        return Ok(None);
+    }
+    Ok(Some(run_reflection(&state).await?.len()))
+}
+
+#[tauri::command]
+fn list_insights(
+    state: tauri::State<'_, AppState>,
+    limit: Option<u32>,
+) -> Result<Vec<Insight>, String> {
+    let mem = state.memory.lock().map_err(|e| e.to_string())?;
+    mem.recent_insights(limit.unwrap_or(50) as usize)
+        .map_err(|e| e.to_string())
+}
+
 /// Everything the assistant knows, in one JSON file: structured memory,
 /// the full event log, and the notes. The user's data is theirs to take.
 #[tauri::command]
@@ -495,6 +616,9 @@ pub fn run() {
             list_skills,
             test_skill,
             run_skill,
+            reflect_now,
+            reflect_if_due,
+            list_insights,
             export_memory,
             wipe_memory
         ])
