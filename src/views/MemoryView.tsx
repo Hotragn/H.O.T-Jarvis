@@ -2,7 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import {
   exportMemory,
   getHistory,
+  listInsights,
+  reflectNow,
   wipeMemory,
+  type Insight,
   type StoredMessage,
 } from "../lib/ipc";
 
@@ -16,12 +19,17 @@ interface Props {
 // it — export everything as JSON, or wipe it. Their data, their call.
 export default function MemoryView({ messageCount, factCount, onWiped }: Props) {
   const [history, setHistory] = useState<StoredMessage[]>([]);
+  const [insights, setInsights] = useState<Insight[]>([]);
+  const [reflecting, setReflecting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     getHistory(500)
       .then(setHistory)
       .catch((e) => setNotice(String(e)));
+    listInsights(50)
+      .then(setInsights)
+      .catch(() => {});
   }, []);
 
   useEffect(refresh, [refresh]);
@@ -41,6 +49,24 @@ export default function MemoryView({ messageCount, factCount, onWiped }: Props) 
       setNotice("Memory exported as JSON.");
     } catch (e) {
       setNotice(String(e));
+    }
+  };
+
+  const doReflect = async () => {
+    if (reflecting) return;
+    setReflecting(true);
+    try {
+      const learned = await reflectNow();
+      refresh();
+      setNotice(
+        learned.length > 0
+          ? `Reflected: ${learned.length} new lesson${learned.length > 1 ? "s" : ""} learned.`
+          : "Reflected: nothing new worth keeping yet.",
+      );
+    } catch (e) {
+      setNotice(String(e));
+    } finally {
+      setReflecting(false);
     }
   };
 
@@ -81,6 +107,39 @@ export default function MemoryView({ messageCount, factCount, onWiped }: Props) 
         <div className="msg" data-role="system">
           {notice}
         </div>
+      )}
+
+      <div className="panel-title-row">
+        <span className="panel-title">
+          lessons learned · {insights.length}
+        </span>
+        <button
+          type="button"
+          className="ghost-btn"
+          disabled={reflecting}
+          onClick={() => void doReflect()}
+        >
+          {reflecting ? "Reflecting…" : "Reflect now"}
+        </button>
+      </div>
+      {insights.length === 0 ? (
+        <p className="panel-hint">
+          After enough activity, Jarvis re-reads its own event log and keeps
+          short lessons about what worked and what failed. They ride along in
+          future prompts.
+        </p>
+      ) : (
+        <ul className="memory-list insights-list">
+          {insights.map((i) => (
+            <li key={i.id} className="memory-row" data-role="assistant">
+              <span className="memory-role">{i.kind}</span>
+              <span className="memory-text">{i.content}</span>
+              <time className="memory-time">
+                {new Date(i.created_at * 1000).toLocaleDateString()}
+              </time>
+            </li>
+          ))}
+        </ul>
       )}
 
       {history.length === 0 ? (

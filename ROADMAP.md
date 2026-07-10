@@ -23,7 +23,8 @@ Machine-readable task queue. Status: `ready` | `in-progress` | `done` | `blocked
 - [ ] `ready` Skill quality: use Ollama structured output (format json) for authoring; consider few-shot per failure class
 - [ ] `ready` Confidence estimate v0: pre-action self-rating surfaced in the HUD (§5.3)
 - [ ] `blocked (needs event log)` Replay timeline UI v0 (§5.4)
-- [ ] `ready` Reflection pass v0: periodic summarization of reasoning traces into memory (§5.2)
+- [x] `done` Reflection pass v0: event-log digest → distilled lessons stored as insights, injected into chat + authoring prompts; manual "Reflect now" + auto-trigger every 20 messages (§5.2)
+- [ ] `ready` Reflection v1: insight scoring/decay + selective forgetting (the open problem)
 
 ## M2 — Interface & voice
 

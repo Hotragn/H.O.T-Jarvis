@@ -47,6 +47,8 @@ export function summarizeEvent(event: AppEvent): string {
         : `skill "${str(p.name)}" refused/failed: ${str(p.error)}`;
     case "memory.wiped":
       return "all remembered messages and facts erased";
+    case "memory.reflected":
+      return `reflected on ${p.events_digested} events · kept ${p.insights} lesson(s)`;
     default:
       return truncate(JSON.stringify(p));
   }

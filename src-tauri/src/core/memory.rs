@@ -24,6 +24,17 @@ pub struct StoredMessage {
     pub created_at: i64,
 }
 
+/// A distilled lesson from experience (§5.2): what worked, what failed,
+/// what to avoid — not just facts about the user.
+#[derive(Debug, Clone, Serialize)]
+pub struct Insight {
+    pub id: i64,
+    pub kind: String,
+    pub content: String,
+    pub source: String,
+    pub created_at: i64,
+}
+
 pub struct MemoryStore {
     conn: Connection,
     path: PathBuf,
@@ -76,6 +87,18 @@ impl MemoryStore {
                      created_at INTEGER NOT NULL
                  );
                  INSERT INTO schema_version (version) VALUES (1);",
+            )?;
+        }
+        if current < 2 {
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS insights (
+                     id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                     kind       TEXT NOT NULL,
+                     content    TEXT NOT NULL,
+                     source     TEXT NOT NULL DEFAULT '',
+                     created_at INTEGER NOT NULL
+                 );
+                 INSERT INTO schema_version (version) VALUES (2);",
             )?;
         }
         Ok(())
@@ -139,6 +162,41 @@ impl MemoryStore {
         Ok(rows)
     }
 
+    pub fn add_insight(&self, kind: &str, content: &str, source: &str) -> Result<i64, MemoryError> {
+        self.conn.execute(
+            "INSERT INTO insights (kind, content, source, created_at) VALUES (?1, ?2, ?3, ?4)",
+            params![kind, content, source, now_unix()],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Newest lessons first — the freshest experience matters most.
+    pub fn recent_insights(&self, limit: usize) -> Result<Vec<Insight>, MemoryError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, kind, content, source, created_at FROM insights
+             ORDER BY id DESC LIMIT ?1",
+        )?;
+        let rows: Vec<Insight> = stmt
+            .query_map(params![limit as i64], |r| {
+                Ok(Insight {
+                    id: r.get(0)?,
+                    kind: r.get(1)?,
+                    content: r.get(2)?,
+                    source: r.get(3)?,
+                    created_at: r.get(4)?,
+                })
+            })?
+            .collect::<Result<_, _>>()?;
+        Ok(rows)
+    }
+
+    pub fn insight_count(&self) -> Result<u64, MemoryError> {
+        Ok(self
+            .conn
+            .query_row("SELECT COUNT(*) FROM insights", [], |r| r.get::<_, i64>(0))?
+            as u64)
+    }
+
     pub fn message_count(&self) -> Result<u64, MemoryError> {
         Ok(self
             .conn
@@ -161,18 +219,20 @@ impl MemoryStore {
                 }))
             })?
             .collect::<Result<_, _>>()?;
+        let insights = self.recent_insights(usize::MAX / 2)?;
         Ok(serde_json::json!({
-            "schema_version": 1,
+            "schema_version": 2,
             "exported_at": now_unix(),
             "facts": facts,
             "messages": messages,
+            "insights": insights,
         }))
     }
 
     /// Deletes all user data but keeps the schema — the user's call, always.
     pub fn wipe(&self) -> Result<(), MemoryError> {
         self.conn
-            .execute_batch("DELETE FROM facts; DELETE FROM messages;")?;
+            .execute_batch("DELETE FROM facts; DELETE FROM messages; DELETE FROM insights;")?;
         Ok(())
     }
 }
@@ -209,11 +269,16 @@ mod tests {
         let db = dir.path().join("m.sqlite3");
         for _ in 0..3 {
             let store = MemoryStore::open(&db).unwrap();
-            let version: i64 = store
+            let (rows, version): (i64, i64) = store
                 .conn
-                .query_row("SELECT COUNT(*) FROM schema_version", [], |r| r.get(0))
+                .query_row(
+                    "SELECT COUNT(*), MAX(version) FROM schema_version",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
                 .unwrap();
-            assert_eq!(version, 1, "migration must not re-run");
+            assert_eq!(version, 2, "schema is at the current version");
+            assert_eq!(rows, 2, "one row per migration step, never re-run");
         }
     }
 
@@ -246,13 +311,64 @@ mod tests {
         let store = MemoryStore::open(&dir.path().join("e.sqlite3")).unwrap();
         store.set_fact("k", "v").unwrap();
         store.append_message("user", "hello").unwrap();
+        store
+            .add_insight("skill", "tests catch bugs", "events 1..5")
+            .unwrap();
 
         let dump = store.export_json().unwrap();
         assert_eq!(dump["facts"][0]["key"], "k");
         assert_eq!(dump["messages"][0]["content"], "hello");
+        assert_eq!(dump["insights"][0]["content"], "tests catch bugs");
 
         store.wipe().unwrap();
         assert_eq!(store.message_count().unwrap(), 0);
         assert_eq!(store.fact_count().unwrap(), 0);
+        assert_eq!(store.insight_count().unwrap(), 0);
+    }
+
+    #[test]
+    fn insights_roundtrip_newest_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::open(&dir.path().join("i.sqlite3")).unwrap();
+        store
+            .add_insight("provider", "ollama answers fast", "events 1..3")
+            .unwrap();
+        store
+            .add_insight("skill", "avoid ${} in rhai", "events 4..9")
+            .unwrap();
+
+        let recent = store.recent_insights(10).unwrap();
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0].content, "avoid ${} in rhai", "newest first");
+        assert_eq!(recent[1].kind, "provider");
+    }
+
+    #[test]
+    fn v1_database_migrates_to_v2_without_losing_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("old.sqlite3");
+        {
+            // Hand-build a v1 database, as shipped in the bootstrap release.
+            let conn = Connection::open(&db).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE schema_version (version INTEGER NOT NULL);
+                 CREATE TABLE facts (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
+                 CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT NOT NULL, content TEXT NOT NULL, created_at INTEGER NOT NULL);
+                 INSERT INTO schema_version (version) VALUES (1);
+                 INSERT INTO facts VALUES ('user.name', 'Hotragn', 0);
+                 INSERT INTO messages (role, content, created_at) VALUES ('user', 'old message', 0);",
+            )
+            .unwrap();
+        }
+
+        let store = MemoryStore::open(&db).unwrap(); // runs v2 migration
+        assert_eq!(
+            store.get_fact("user.name").unwrap().as_deref(),
+            Some("Hotragn"),
+            "v1 data survives the upgrade"
+        );
+        assert_eq!(store.message_count().unwrap(), 1);
+        store.add_insight("general", "works", "").unwrap();
+        assert_eq!(store.insight_count().unwrap(), 1);
     }
 }
