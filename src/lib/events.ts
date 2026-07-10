@@ -20,7 +20,9 @@ export function summarizeEvent(event: AppEvent): string {
     case "chat.assistant": {
       const route = [str(p.provider), str(p.model)].filter(Boolean).join(" · ");
       const ms = typeof p.duration_ms === "number" ? ` · ${p.duration_ms}ms` : "";
-      return `${truncate(str(p.text))}  [${route}${ms}]`;
+      const conf =
+        typeof p.confidence === "number" ? ` · conf ${p.confidence}%` : "";
+      return `${truncate(str(p.text))}  [${route}${ms}${conf}]`;
     }
     case "chat.failed":
       return truncate(`failed: ${str(p.error)}`);

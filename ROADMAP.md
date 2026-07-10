@@ -21,7 +21,8 @@ Machine-readable task queue. Status: `ready` | `in-progress` | `done` | `blocked
 - [x] `done` Skill engine v0: manifest + versioned Rhai skills + "every skill ships a test" harness; failing skills flagged and refused (§5.1)
 - [x] `done` Skill engine v1: assistant authors skills on request (LLM writes code + test, engine validates, Reflexion refinement loop, flagged if never passing)
 - [ ] `ready` Skill quality: use Ollama structured output (format json) for authoring; consider few-shot per failure class
-- [ ] `ready` Confidence estimate v0: pre-action self-rating surfaced in the HUD (§5.3)
+- [x] `done` Confidence estimate v0: self-rated 0-100 per answer, clarify-instead-of-guess below 40, gauge dial on the core + per-message label (§5.3)
+- [ ] `ready` Confidence v1: calibration tracking (predicted vs. outcomes via reflection), gate risky actions on threshold
 - [ ] `blocked (needs event log)` Replay timeline UI v0 (§5.4)
 - [x] `done` Reflection pass v0: event-log digest → distilled lessons stored as insights, injected into chat + authoring prompts; manual "Reflect now" + auto-trigger every 20 messages (§5.2)
 - [ ] `ready` Reflection v1: insight scoring/decay + selective forgetting (the open problem)

@@ -26,6 +26,9 @@ pub struct ChatReply {
     pub model: String,
     /// True when served from the response cache instead of a fresh call.
     pub cached: bool,
+    /// Self-rated probability (0-100) that the answer is right (§5.3).
+    /// Filled in by the command layer after marker extraction.
+    pub confidence: Option<u8>,
 }
 
 /// Provider-call failure with enough structure to drive backoff decisions.
@@ -332,6 +335,7 @@ impl Router {
             provider: ProviderId::Ollama.name().into(),
             model: self.config.ollama_model.clone(),
             cached: false,
+            confidence: None,
         })
     }
 
@@ -372,6 +376,7 @@ impl Router {
             provider: provider.name().into(),
             model: model.to_string(),
             cached: false,
+            confidence: None,
         })
     }
 }
@@ -467,6 +472,7 @@ mod tests {
                 provider: "ollama".into(),
                 model: "llama3.2".into(),
                 cached: false,
+                confidence: None,
             },
             Instant::now(),
         );
