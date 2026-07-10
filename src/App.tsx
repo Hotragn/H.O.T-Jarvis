@@ -13,6 +13,7 @@ import {
   type Status,
   type Telemetry,
 } from "./lib/ipc";
+import { confidenceLabel } from "./lib/confidence";
 import { describeStatus } from "./lib/status";
 import {
   nextTheme,
@@ -69,6 +70,7 @@ export default function App() {
   const [items, setItems] = useState<ChatItem[]>([]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const [lastConfidence, setLastConfidence] = useState<number | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLInputElement>(null);
@@ -162,13 +164,15 @@ export default function App() {
     setBusy(true);
     try {
       const reply = await chatSend(text);
+      setLastConfidence(reply.confidence);
+      const conf = confidenceLabel(reply.confidence);
       setItems((prev) => [
         ...prev,
         {
           key: `a-${Date.now()}`,
           role: "assistant",
           content: reply.content,
-          meta: `${reply.provider} · ${reply.model}${reply.cached ? " · cached" : ""}`,
+          meta: `${reply.provider} · ${reply.model}${reply.cached ? " · cached" : ""}${conf ? ` · ${conf}` : ""}`,
         },
       ]);
       getStatus().then(setStatus).catch(() => {});
@@ -257,7 +261,7 @@ export default function App() {
           </div>
         </div>
 
-        <ArcCore state={coreState} theme={theme} />
+        <ArcCore state={coreState} theme={theme} confidence={lastConfidence} />
 
         <div className="readout-stack">
           <div className="readout" data-side="right">

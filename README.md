@@ -8,9 +8,13 @@ H.O.T-Jarvis is an open-source, local-first personal AI assistant shipped as a r
 
 ## What works today
 
-- **Desktop app shell** (Tauri v2 + React) with a dark/light themed HUD, an animated activity waveform, and a chat view.
-- **Model router** — tries Ollama first (local, private, unlimited), then free cloud tiers (Groq, OpenRouter `:free`) if you add a key. With nothing configured, the app still starts and shows you exactly how to get free inference in one step.
-- **Persistent memory** — conversation history and key-value profile facts stored in SQLite on your machine. Restart the app; it still remembers.
+- **Desktop app shell** (Tauri v2 + React): a Jarvis-style HUD with an arc-reactor core visualizer, dark/light themes, tab navigation (chat / skills / notes / memory / events), a Ctrl+K command palette, and live telemetry (CPU, RAM, uptime — real numbers only).
+- **Model router** — tries Ollama first (local, private, unlimited), then free cloud tiers (Groq, OpenRouter `:free`) if you add a key. Response caching and rate-limit backoff keep it polite to free tiers. With nothing configured, the app still starts and shows you exactly how to get free inference in one step.
+- **Persistent memory** — conversation history, profile facts, and learned insights in SQLite with versioned migrations. Restart the app; it still remembers. Export everything as one JSON file, or wipe it — your data, your control.
+- **Self-evolving skill library** — ask Jarvis to build a skill and it writes sandboxed code *plus a test*, proves it by running the test, and refines on failure. Failing skills are flagged and refuse to run. Versioned with history.
+- **Reflective reasoning-memory** — Jarvis periodically re-reads its own action log and keeps short lessons about what worked and what failed; the freshest lessons ride along in future prompts.
+- **Confidence meter** — every answer carries the model's self-rated probability of being right, shown as a gauge on the core; below the threshold it asks a clarifying question instead of guessing. Surfaced honestly, not blindly trusted.
+- **Append-only event log** — every action is recorded and inspectable in a timeline view (the seed of replay & undo).
 - **One built-in tool** — local notes (saved inside the app's own data folder, never elsewhere).
 
 ## Quickstart
@@ -39,12 +43,12 @@ Prerequisites: [Node.js](https://nodejs.org) 20+, [Rust](https://rustup.rs) stab
 
 The router respects free-tier rate limits (backoff and fallback) so the app never pressures you to pay.
 
-## Hero features (planned — tracked in [ROADMAP.md](ROADMAP.md))
+## Hero features (tracked in [ROADMAP.md](ROADMAP.md))
 
-1. **Self-evolving skill library** *(planned)* — the assistant authors, unit-tests, versions, and reuses its own skills; you can watch the library grow in the UI.
-2. **Reflective reasoning-memory** *(planned)* — it stores reasoning traces and outcomes, not just facts, and improves from its own experience.
-3. **Calibrated autonomy** *(planned)* — a visible confidence meter; below a threshold it asks you instead of guessing.
-4. **Replay & undo** *(planned)* — every action goes to an append-only event log with a timeline UI to inspect, replay, and undo.
+1. **Self-evolving skill library** *(shipped, v1)* — the assistant authors, tests, versions, and reuses its own skills; watch the library grow in the SKILLS tab.
+2. **Reflective reasoning-memory** *(shipped, v0)* — it stores lessons from its own outcomes, not just facts, and improves from experience.
+3. **Calibrated autonomy** *(shipped, v0)* — a visible confidence gauge; below a threshold it asks you instead of guessing.
+4. **Replay & undo** *(in progress)* — the append-only event log and timeline view exist; deterministic replay and undo controls are next.
 
 ## Honest limitations
 

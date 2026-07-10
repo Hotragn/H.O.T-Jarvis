@@ -6,6 +6,8 @@ export type CoreState = "offline" | "idle" | "thinking";
 interface Props {
   state: CoreState;
   theme: Theme; // re-read palette when the theme flips
+  /// Self-rated confidence (0-100) of the latest answer; drawn as a gauge.
+  confidence?: number | null;
 }
 
 interface Palette {
@@ -13,16 +15,19 @@ interface Palette {
   accent2: string;
   dim: string;
   line: string;
+  warn: string;
 }
 
 // The arc-reactor core: the assistant's physical presence in the HUD.
 // Concentric instrument rings around a glowing iris — dim and still when no
 // model is available, breathing when idle, spinning hard while thinking.
 // One canvas, ~220px, redrawn per frame; the only glow in the interface.
-export default function ArcCore({ state, theme }: Props) {
+export default function ArcCore({ state, theme, confidence }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef<CoreState>(state);
   stateRef.current = state;
+  const confidenceRef = useRef<number | null>(confidence ?? null);
+  confidenceRef.current = confidence ?? null;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -36,6 +41,7 @@ export default function ArcCore({ state, theme }: Props) {
       accent2: styles.getPropertyValue("--accent-2").trim() || "#56dfb4",
       dim: styles.getPropertyValue("--text-dim").trim() || "#64788f",
       line: styles.getPropertyValue("--line-strong").trim() || "#3a4a5c",
+      warn: styles.getPropertyValue("--warn").trim() || "#f0b23e",
     };
     const reduceMotion = window.matchMedia(
       "(prefers-reduced-motion: reduce)",
@@ -101,6 +107,25 @@ export default function ArcCore({ state, theme }: Props) {
       ctx.beginPath();
       ctx.arc(c, c, R - 30, 0, Math.PI * 2);
       ctx.stroke();
+
+      // Confidence gauge (§5.3): a 270° dial just inside the hairline ring.
+      // Green-teal when sure, amber when it should have asked instead.
+      const conf = confidenceRef.current;
+      if (live && conf !== null) {
+        const start = Math.PI * 0.75; // 135°, classic gauge origin
+        const sweep = (Math.min(100, Math.max(0, conf)) / 100) * Math.PI * 1.5;
+        ctx.strokeStyle = conf >= 70 ? palette.accent2 : conf >= 40 ? main : palette.warn;
+        ctx.globalAlpha = 0.9;
+        ctx.lineWidth = 2.6;
+        ctx.beginPath();
+        ctx.arc(c, c, R - 37, start, start + sweep);
+        ctx.stroke();
+        ctx.globalAlpha = 0.18;
+        ctx.lineWidth = 2.6;
+        ctx.beginPath();
+        ctx.arc(c, c, R - 37, start + sweep, start + Math.PI * 1.5);
+        ctx.stroke();
+      }
 
       // Radial voice bars — the assistant's breath, between iris and rings.
       const BARS = 48;

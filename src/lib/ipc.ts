@@ -30,6 +30,7 @@ export interface ChatReply {
   provider: string;
   model: string;
   cached: boolean;
+  confidence: number | null;
 }
 
 export interface Telemetry {

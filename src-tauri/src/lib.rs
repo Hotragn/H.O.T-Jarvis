@@ -7,6 +7,7 @@ pub mod core;
 use crate::core::authoring::{
     authoring_messages, parse_skill_draft, refinement_message, MAX_ATTEMPTS,
 };
+use crate::core::confidence::{confidence_instruction, extract_confidence};
 use crate::core::eventlog::{Event, EventLog};
 use crate::core::memory::{Insight, MemoryStore, StoredMessage};
 use crate::core::reflection::{
@@ -136,7 +137,11 @@ async fn chat_send(state: tauri::State<'_, AppState>, text: String) -> Result<Ch
             .collect();
         context.push(ChatMessage {
             role: "system".into(),
-            content: with_lessons(SYSTEM_PROMPT, &lessons),
+            content: format!(
+                "{}{}",
+                with_lessons(SYSTEM_PROMPT, &lessons),
+                confidence_instruction()
+            ),
         });
         for m in mem.recent_messages(20).map_err(|e| e.to_string())? {
             context.push(ChatMessage {
@@ -149,7 +154,11 @@ async fn chat_send(state: tauri::State<'_, AppState>, text: String) -> Result<Ch
     let asked_at = Instant::now();
     let outcome = state.router.chat(&context).await;
     match outcome {
-        Ok(reply) => {
+        Ok(mut reply) => {
+            // §5.3: pull the self-rating out of the text; it travels as data.
+            let (cleaned, confidence) = extract_confidence(&reply.content);
+            reply.content = cleaned;
+            reply.confidence = confidence;
             {
                 let mem = state.memory.lock().map_err(|e| e.to_string())?;
                 mem.append_message("assistant", &reply.content)
@@ -163,6 +172,7 @@ async fn chat_send(state: tauri::State<'_, AppState>, text: String) -> Result<Ch
                     "provider": reply.provider,
                     "model": reply.model,
                     "duration_ms": asked_at.elapsed().as_millis() as u64,
+                    "confidence": reply.confidence,
                 }),
             );
             Ok(reply)

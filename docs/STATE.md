@@ -24,9 +24,9 @@ First-session bootstrap in progress on branch `feat/bootstrap-core`. Repo went f
 
 ## Next 3 tasks
 
-1. Confidence estimate v0 (§5.3): pre-action self-rating surfaced in the HUD gauge — third hero feature.
-2. Record the README GIF now that the HUD is real (chat + skills + authoring + events + reflection) — needs the owner or a screen-recording tool.
-3. Insight scoring/decay + selective forgetting (reflection v1).
+1. Replay v1 (§5.4, last hero feature): deterministic re-run of a session from the event log; undo for reversible actions.
+2. Record the README GIF (chat + skills + authoring + events + reflection + confidence gauge) — needs the owner or a screen-recording tool.
+3. Update README feature list: hero features 1-3 are now real, not planned.
 
 ## UI state (2026-07-06)
 
