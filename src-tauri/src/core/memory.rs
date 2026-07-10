@@ -197,6 +197,14 @@ impl MemoryStore {
             as u64)
     }
 
+    /// Removes one message (undo support). Returns whether a row existed.
+    pub fn delete_message(&self, id: i64) -> Result<bool, MemoryError> {
+        let affected = self
+            .conn
+            .execute("DELETE FROM messages WHERE id = ?1", params![id])?;
+        Ok(affected > 0)
+    }
+
     pub fn message_count(&self) -> Result<u64, MemoryError> {
         Ok(self
             .conn

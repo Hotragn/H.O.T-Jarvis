@@ -51,6 +51,18 @@ export function summarizeEvent(event: AppEvent): string {
       return "all remembered messages and facts erased";
     case "memory.reflected":
       return `reflected on ${p.events_digested} events · kept ${p.insights} lesson(s)`;
+    case "undo.chat":
+      return `undid event #${p.undoes}: message removed`;
+    case "undo.note":
+      return `undid event #${p.undoes}: note "${str(p.slug)}" reverted`;
+    case "undo.skill":
+      return p.deleted
+        ? `undid event #${p.undoes}: skill "${str(p.name)}" deleted`
+        : `undid event #${p.undoes}: skill "${str(p.name)}" reverted`;
+    case "replay.audited":
+      return p.deterministic
+        ? `replay audit: deterministic · ${p.matched} messages verified`
+        : `replay audit: drift · ${p.missing_in_db} missing, ${p.extra_in_db} extra`;
     default:
       return truncate(JSON.stringify(p));
   }

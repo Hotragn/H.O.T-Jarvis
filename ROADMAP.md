@@ -23,7 +23,8 @@ Machine-readable task queue. Status: `ready` | `in-progress` | `done` | `blocked
 - [ ] `ready` Skill quality: use Ollama structured output (format json) for authoring; consider few-shot per failure class
 - [x] `done` Confidence estimate v0: self-rated 0-100 per answer, clarify-instead-of-guess below 40, gauge dial on the core + per-message label (§5.3)
 - [ ] `ready` Confidence v1: calibration tracking (predicted vs. outcomes via reflection), gate risky actions on threshold
-- [ ] `blocked (needs event log)` Replay timeline UI v0 (§5.4)
+- [x] `done` Replay & undo v1: undo for chat/notes/skills with inverse state captured at write time; revert-style skill rollbacks; deterministic replay audit (log vs. database drift report); undo buttons + audit in the timeline (§5.4)
+- [ ] `ready` Replay v2: step-through session player; undo for more kinds; audit covers notes/skills state too
 - [x] `done` Reflection pass v0: event-log digest → distilled lessons stored as insights, injected into chat + authoring prompts; manual "Reflect now" + auto-trigger every 20 messages (§5.2)
 - [ ] `ready` Reflection v1: insight scoring/decay + selective forgetting (the open problem)
 

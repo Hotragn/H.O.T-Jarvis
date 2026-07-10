@@ -104,6 +104,28 @@ export async function getEvents(limit = 200): Promise<AppEvent[]> {
   return invoke<AppEvent[]>("get_events", { limit });
 }
 
+export interface ReplayedMessage {
+  role: string;
+  content: string;
+}
+
+export interface ReplayReport {
+  matched: number;
+  missing_in_db: ReplayedMessage[];
+  extra_in_db: ReplayedMessage[];
+  deterministic: boolean;
+}
+
+export async function undoEvent(eventId: number): Promise<string> {
+  if (!inTauri) throw new Error("No backend in the browser preview.");
+  return invoke<string>("undo_event", { eventId });
+}
+
+export async function replayAudit(): Promise<ReplayReport> {
+  if (!inTauri) throw new Error("No backend in the browser preview.");
+  return invoke<ReplayReport>("replay_audit");
+}
+
 export async function listNotes(): Promise<string[]> {
   if (!inTauri) return [];
   return invoke<string[]>("list_notes");

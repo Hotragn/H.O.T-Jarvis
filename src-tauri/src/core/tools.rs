@@ -102,6 +102,17 @@ impl NotesTool {
         }
         Ok(fs::read_to_string(path)?)
     }
+
+    /// Removes a note (undo support). Returns whether it existed.
+    pub fn delete_note(&self, name: &str) -> Result<bool, ToolError> {
+        let slug = Self::slug(name).ok_or(ToolError::InvalidName)?;
+        let path = self.path_for(&slug);
+        if !path.exists() {
+            return Ok(false);
+        }
+        fs::remove_file(path)?;
+        Ok(true)
+    }
 }
 
 #[cfg(test)]

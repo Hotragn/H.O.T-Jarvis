@@ -48,7 +48,7 @@ The router respects free-tier rate limits (backoff and fallback) so the app neve
 1. **Self-evolving skill library** *(shipped, v1)* — the assistant authors, tests, versions, and reuses its own skills; watch the library grow in the SKILLS tab.
 2. **Reflective reasoning-memory** *(shipped, v0)* — it stores lessons from its own outcomes, not just facts, and improves from experience.
 3. **Calibrated autonomy** *(shipped, v0)* — a visible confidence gauge; below a threshold it asks you instead of guessing.
-4. **Replay & undo** *(in progress)* — the append-only event log and timeline view exist; deterministic replay and undo controls are next.
+4. **Replay & undo** *(shipped, v1)* — every action is recorded with enough state to reverse it: undo chat turns, note saves, and skill changes from the timeline, and run a replay audit that proves the log deterministically reproduces memory.
 
 ## Honest limitations
 

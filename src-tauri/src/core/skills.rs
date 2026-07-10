@@ -196,6 +196,28 @@ impl SkillEngine {
         Ok(manifest)
     }
 
+    /// Revert-style rollback (undo support): restores the previous version's
+    /// sources as a NEW version, preserving the append-only history chain —
+    /// like `git revert`, never like a force-push. A v1 skill with nothing
+    /// to revert to is deleted entirely. Returns the manifest, or None if
+    /// the skill was deleted.
+    pub fn rollback_skill(&self, name: &str) -> Result<Option<SkillManifest>, SkillError> {
+        let slug = slugify(name).ok_or(SkillError::InvalidName)?;
+        let manifest = self.read_manifest(&slug)?;
+        let dir = self.dir_of(&slug);
+        let previous = dir
+            .join("history")
+            .join(format!("v{}", manifest.version.saturating_sub(1)));
+        if manifest.version <= 1 || !previous.exists() {
+            fs::remove_dir_all(&dir)?;
+            return Ok(None);
+        }
+        let code = fs::read_to_string(previous.join("skill.rhai"))?;
+        let test = fs::read_to_string(previous.join("test.rhai"))?;
+        let description = format!("{} (reverted)", manifest.description);
+        Ok(Some(self.save_skill(&slug, &description, &code, &test)?))
+    }
+
     /// Executes `fn run(input)`. A skill whose last test failed is refused —
     /// flagged for refinement, not used blindly (§5.1).
     pub fn run_skill(&self, name: &str, input: &str) -> Result<String, SkillError> {
@@ -320,6 +342,42 @@ mod tests {
             TestStatus::Failed(detail) => assert!(detail.contains("compile error")),
             other => panic!("expected compile failure flag, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn rollback_reverts_to_previous_version_as_new_version() {
+        let (_dir, engine) = engine();
+        engine
+            .save_skill("greeter", "v1", GREET_CODE, GREET_TEST)
+            .unwrap();
+        let v2_code = r#"fn run(input) { "V2: " + input }"#;
+        let v2_test = r#"fn test() { run("x") == "V2: x" }"#;
+        engine
+            .save_skill("greeter", "v2", v2_code, v2_test)
+            .unwrap();
+
+        let reverted = engine.rollback_skill("greeter").unwrap().unwrap();
+        assert_eq!(
+            reverted.version, 3,
+            "revert is a new version, not a rewrite"
+        );
+        assert_eq!(reverted.test_status, TestStatus::Passed);
+        assert_eq!(
+            engine.run_skill("greeter", "hi").unwrap(),
+            "You said: hi",
+            "v1 behavior restored"
+        );
+    }
+
+    #[test]
+    fn rollback_of_first_version_deletes_the_skill() {
+        let (_dir, engine) = engine();
+        engine
+            .save_skill("once", "only version", GREET_CODE, GREET_TEST)
+            .unwrap();
+        let gone = engine.rollback_skill("once").unwrap();
+        assert!(gone.is_none());
+        assert!(engine.list_skills().unwrap().is_empty());
     }
 
     #[test]
