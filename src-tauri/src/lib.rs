@@ -14,6 +14,7 @@ use crate::core::reflection::{
     digest_events, parse_insights, reflection_messages, with_lessons, INSIGHTS_IN_PROMPT,
     REFLECT_EVERY_MESSAGES,
 };
+use crate::core::replay::{audit, rebuild_messages, ReplayReport, ReplayedMessage};
 use crate::core::router::{onboarding_message, ChatMessage, ChatReply, Router, RouterConfig};
 use crate::core::skills::{SkillEngine, SkillManifest};
 use crate::core::tools::NotesTool;
@@ -125,9 +126,11 @@ async fn chat_send(state: tauri::State<'_, AppState>, text: String) -> Result<Ch
     }
     // Persist the user turn and build context, releasing the lock before I/O.
     let mut context = Vec::new();
+    let user_msg_id;
     {
         let mem = state.memory.lock().map_err(|e| e.to_string())?;
-        mem.append_message("user", &trimmed)
+        user_msg_id = mem
+            .append_message("user", &trimmed)
             .map_err(|e| e.to_string())?;
         let lessons: Vec<String> = mem
             .recent_insights(INSIGHTS_IN_PROMPT)
@@ -150,7 +153,11 @@ async fn chat_send(state: tauri::State<'_, AppState>, text: String) -> Result<Ch
             });
         }
     }
-    log_event(&state, "chat.user", serde_json::json!({ "text": trimmed }));
+    log_event(
+        &state,
+        "chat.user",
+        serde_json::json!({ "text": trimmed, "msg_id": user_msg_id }),
+    );
     let asked_at = Instant::now();
     let outcome = state.router.chat(&context).await;
     match outcome {
@@ -159,11 +166,11 @@ async fn chat_send(state: tauri::State<'_, AppState>, text: String) -> Result<Ch
             let (cleaned, confidence) = extract_confidence(&reply.content);
             reply.content = cleaned;
             reply.confidence = confidence;
-            {
+            let assistant_msg_id = {
                 let mem = state.memory.lock().map_err(|e| e.to_string())?;
                 mem.append_message("assistant", &reply.content)
-                    .map_err(|e| e.to_string())?;
-            }
+                    .map_err(|e| e.to_string())?
+            };
             log_event(
                 &state,
                 "chat.assistant",
@@ -173,6 +180,7 @@ async fn chat_send(state: tauri::State<'_, AppState>, text: String) -> Result<Ch
                     "model": reply.model,
                     "duration_ms": asked_at.elapsed().as_millis() as u64,
                     "confidence": reply.confidence,
+                    "msg_id": assistant_msg_id,
                 }),
             );
             Ok(reply)
@@ -204,6 +212,8 @@ fn save_note(
     title: String,
     content: String,
 ) -> Result<String, String> {
+    // Capture the inverse state up front: undo needs to know what was there.
+    let previous = state.notes.read_note(&title).ok();
     let slug = state
         .notes
         .save_note(&title, &content)
@@ -211,7 +221,7 @@ fn save_note(
     log_event(
         &state,
         "note.saved",
-        serde_json::json!({ "slug": slug, "chars": content.len() }),
+        serde_json::json!({ "slug": slug, "chars": content.len(), "previous": previous }),
     );
     Ok(slug)
 }
@@ -524,6 +534,124 @@ fn list_insights(
         .map_err(|e| e.to_string())
 }
 
+/// Undo (§5.4): reverses one recorded action using the inverse state
+/// captured in its event. Every undo is itself an event — the timeline
+/// never lies about what happened.
+#[tauri::command]
+fn undo_event(state: tauri::State<'_, AppState>, event_id: u64) -> Result<String, String> {
+    let event = {
+        let log = state.events.lock().map_err(|e| e.to_string())?;
+        log.tail(usize::MAX / 2)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .find(|e| e.id == event_id)
+            .ok_or_else(|| format!("event #{event_id} not found"))?
+    };
+    let p = &event.payload;
+    let outcome = match event.kind.as_str() {
+        "chat.user" | "chat.assistant" => {
+            let msg_id = p["msg_id"]
+                .as_i64()
+                .ok_or("this message predates undo support")?;
+            let removed = {
+                let mem = state.memory.lock().map_err(|e| e.to_string())?;
+                mem.delete_message(msg_id).map_err(|e| e.to_string())?
+            };
+            if !removed {
+                return Err("that message is already gone".into());
+            }
+            log_event(
+                &state,
+                "undo.chat",
+                serde_json::json!({ "undoes": event.id, "msg_id": msg_id }),
+            );
+            "message removed from memory".to_string()
+        }
+        "note.saved" => {
+            let slug = p["slug"].as_str().ok_or("event has no note slug")?;
+            let outcome = match p["previous"].as_str() {
+                Some(previous) => {
+                    state
+                        .notes
+                        .save_note(slug, previous)
+                        .map_err(|e| e.to_string())?;
+                    format!("note \"{slug}\" restored to its previous content")
+                }
+                None => {
+                    state.notes.delete_note(slug).map_err(|e| e.to_string())?;
+                    format!("note \"{slug}\" deleted (it was newly created)")
+                }
+            };
+            log_event(
+                &state,
+                "undo.note",
+                serde_json::json!({ "undoes": event.id, "slug": slug }),
+            );
+            outcome
+        }
+        "skill.saved" | "skill.authored" => {
+            let name = p["name"].as_str().ok_or("event has no skill name")?;
+            let rolled = state
+                .skills
+                .rollback_skill(name)
+                .map_err(|e| e.to_string())?;
+            let outcome = match &rolled {
+                Some(manifest) => format!(
+                    "skill \"{}\" reverted to previous behavior (as v{})",
+                    name, manifest.version
+                ),
+                None => format!("skill \"{name}\" deleted (it had no previous version)"),
+            };
+            log_event(
+                &state,
+                "undo.skill",
+                serde_json::json!({ "undoes": event.id, "name": name, "deleted": rolled.is_none() }),
+            );
+            outcome
+        }
+        other => {
+            return Err(format!(
+                "\"{other}\" actions aren't reversible (wipes and reflections are permanent)"
+            ))
+        }
+    };
+    Ok(outcome)
+}
+
+/// Replay audit (§5.4): rebuilds the conversation from the event log alone
+/// and diffs it against the live database. Deterministic = they agree.
+#[tauri::command]
+fn replay_audit(state: tauri::State<'_, AppState>) -> Result<ReplayReport, String> {
+    let events = {
+        let log = state.events.lock().map_err(|e| e.to_string())?;
+        log.tail(usize::MAX / 2).map_err(|e| e.to_string())?
+    };
+    let replayed = rebuild_messages(&events);
+    let actual: Vec<ReplayedMessage> = {
+        let mem = state.memory.lock().map_err(|e| e.to_string())?;
+        mem.recent_messages(usize::MAX / 2)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|m| ReplayedMessage {
+                role: m.role,
+                content: m.content,
+            })
+            .collect()
+    };
+    let report = audit(&replayed, &actual);
+    log_event(
+        &state,
+        "replay.audited",
+        serde_json::json!({
+            "matched": report.matched,
+            "missing_in_db": report.missing_in_db.len(),
+            "extra_in_db": report.extra_in_db.len(),
+            "deterministic": report.deterministic,
+        }),
+    );
+    Ok(report)
+}
+
 /// Everything the assistant knows, in one JSON file: structured memory,
 /// the full event log, and the notes. The user's data is theirs to take.
 #[tauri::command]
@@ -629,6 +757,8 @@ pub fn run() {
             reflect_now,
             reflect_if_due,
             list_insights,
+            undo_event,
+            replay_audit,
             export_memory,
             wipe_memory
         ])

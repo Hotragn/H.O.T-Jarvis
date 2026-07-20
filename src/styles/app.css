@@ -714,12 +714,33 @@ body {
 
 .event-row {
   display: grid;
-  grid-template-columns: 44px 110px 1fr auto;
+  grid-template-columns: 44px 110px 1fr auto auto;
   gap: var(--space-2);
   align-items: baseline;
   padding: 7px 4px;
   border-bottom: 1px solid var(--line);
   font-size: 13px;
+}
+
+.undo-btn {
+  padding: 2px 8px;
+  font-size: 9px;
+  opacity: 0;
+  transition: opacity var(--dur-quick) var(--ease-out);
+}
+
+.event-row:hover .undo-btn,
+.undo-btn:focus-visible {
+  opacity: 1;
+}
+
+.undo-spacer {
+  width: 44px;
+}
+
+.msg[data-audit="ok"] {
+  background: transparent;
+  border-left-color: var(--accent-2);
 }
 
 .event-id {

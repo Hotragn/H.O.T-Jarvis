@@ -22,11 +22,15 @@ First-session bootstrap in progress on branch `feat/bootstrap-core`. Repo went f
 
 - 2026-07-06: Owner ran `npm run tauri dev` with live Ollama (llama3.2) — app works end-to-end on the target machine. PR #1 merged; branch auto-cleanup workflow confirmed working.
 
+## Hero features: ALL FOUR SHIPPED (v0/v1) as of 2026-07-07
+
+Skill library (§5.1), reasoning-memory (§5.2), confidence (§5.3), replay & undo (§5.4). The product identity from the brief is now real, end to end, tested.
+
 ## Next 3 tasks
 
-1. Replay v1 (§5.4, last hero feature): deterministic re-run of a session from the event log; undo for reversible actions.
-2. Record the README GIF (chat + skills + authoring + events + reflection + confidence gauge) — needs the owner or a screen-recording tool.
-3. Update README feature list: hero features 1-3 are now real, not planned.
+1. Record the README GIF — the 10-second screen recording the brief calls for; needs the owner or a screen-recording tool.
+2. Tag v0.1.0: first release with a runnable core + all four hero features (brief §8 says tag once there's a runnable core).
+3. Pick the next milestone with the owner: M2 interface depth (routing/palette expansion, shared-element transitions, voice) vs. M3 autonomy (auto mode with guardrails) vs. memory v1 (vector recall, selective forgetting).
 
 ## UI state (2026-07-06)
 

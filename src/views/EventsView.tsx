@@ -1,34 +1,87 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { eventDomain, summarizeEvent } from "../lib/events";
-import { getEvents, type AppEvent } from "../lib/ipc";
+import {
+  getEvents,
+  replayAudit,
+  undoEvent,
+  type AppEvent,
+  type ReplayReport,
+} from "../lib/ipc";
+import { isReversible } from "../lib/undo";
 
-// The action timeline: every event the assistant has logged, newest last.
-// Read-only v0 of the replay & undo surface — inspection first, controls
-// once the engine can actually replay and reverse.
+// The action timeline (§5.4): inspect everything, undo what's reversible,
+// and audit that the log deterministically reproduces the live memory.
+// Undos append to the timeline — history is never rewritten.
 export default function EventsView() {
   const [events, setEvents] = useState<AppEvent[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [report, setReport] = useState<ReplayReport | null>(null);
+  const [auditing, setAuditing] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
-  useEffect(() => {
+  const refresh = useCallback(() => {
     getEvents(300)
       .then(setEvents)
-      .catch((e) => setError(String(e)));
-    const timer = window.setInterval(() => {
-      getEvents(300).then(setEvents).catch(() => {});
-    }, 5000);
-    return () => window.clearInterval(timer);
+      .catch((e) => setNotice(String(e)));
   }, []);
+
+  useEffect(() => {
+    refresh();
+    const timer = window.setInterval(refresh, 5000);
+    return () => window.clearInterval(timer);
+  }, [refresh]);
+
+  const doUndo = async (id: number) => {
+    try {
+      setNotice(await undoEvent(id));
+      refresh();
+    } catch (e) {
+      setNotice(String(e));
+    }
+  };
+
+  const doAudit = async () => {
+    if (auditing) return;
+    setAuditing(true);
+    setReport(null);
+    try {
+      setReport(await replayAudit());
+      refresh();
+    } catch (e) {
+      setNotice(String(e));
+    } finally {
+      setAuditing(false);
+    }
+  };
 
   return (
     <div className="events-view">
       <div className="panel-title-row">
         <span className="panel-title">event log · {events.length} entries</span>
-        <span className="panel-title">append-only · replay coming in m1</span>
+        <button
+          type="button"
+          className="ghost-btn"
+          disabled={auditing}
+          onClick={() => void doAudit()}
+        >
+          {auditing ? "Auditing…" : "Replay audit"}
+        </button>
       </div>
 
-      {error && (
+      {notice && (
         <div className="msg" data-role="system">
-          {error}
+          {notice}
+        </div>
+      )}
+
+      {report && (
+        <div
+          className="msg"
+          data-role="system"
+          data-audit={report.deterministic ? "ok" : "drift"}
+        >
+          {report.deterministic
+            ? `Replay audit: deterministic — the log reproduces all ${report.matched} messages in memory exactly.`
+            : `Replay audit: drift detected — ${report.matched} matched, ${report.missing_in_db.length} in the log but missing from memory, ${report.extra_in_db.length} in memory but not in the log.`}
         </div>
       )}
 
@@ -44,6 +97,18 @@ export default function EventsView() {
               <span className="event-id">#{e.id}</span>
               <span className="event-kind">{e.kind}</span>
               <span className="memory-text">{summarizeEvent(e)}</span>
+              {isReversible(e.kind) ? (
+                <button
+                  type="button"
+                  className="ghost-btn undo-btn"
+                  title="reverse this action"
+                  onClick={() => void doUndo(e.id)}
+                >
+                  undo
+                </button>
+              ) : (
+                <span className="undo-spacer" aria-hidden="true" />
+              )}
               <time className="memory-time">
                 {new Date(e.ts * 1000).toLocaleTimeString()}
               </time>
