@@ -1,7 +1,23 @@
 import { useEffect, useRef } from "react";
 import type { Theme } from "../lib/theme";
 
-export type CoreState = "offline" | "idle" | "thinking";
+export type CoreState = "offline" | "idle" | "thinking" | "speaking" | "listening";
+
+/// Per-state motion profile: how alive the core is and how fast it spins.
+export function stateProfile(state: CoreState): { energy: number; spin: number } {
+  switch (state) {
+    case "thinking":
+      return { energy: 1, spin: 0.0011 };
+    case "speaking":
+      return { energy: 0.75, spin: 0.0006 };
+    case "listening":
+      return { energy: 0.55, spin: 0.0004 };
+    case "idle":
+      return { energy: 0.35, spin: 0.00022 };
+    case "offline":
+      return { energy: 0.06, spin: 0.00022 };
+  }
+}
 
 interface Props {
   state: CoreState;
@@ -63,10 +79,10 @@ export default function ArcCore({ state, theme, confidence }: Props) {
       const c = size / 2;
       const R = size / 2 - 6;
       const live = mode !== "offline";
-      const energy = mode === "thinking" ? 1 : mode === "idle" ? 0.35 : 0.06;
-      const spin = mode === "thinking" ? 0.0011 : 0.00022;
+      const { energy, spin } = stateProfile(mode);
       const main = live ? palette.accent : palette.dim;
-      const breath = 0.5 + 0.5 * Math.sin(t * (mode === "thinking" ? 0.006 : 0.0016));
+      const breath =
+        0.5 + 0.5 * Math.sin(t * (mode === "thinking" || mode === "speaking" ? 0.006 : 0.0016));
 
       // Outer tick ring: 72 marks, a deterministic scatter of them lit.
       for (let i = 0; i < 72; i++) {
@@ -131,7 +147,8 @@ export default function ArcCore({ state, theme, confidence }: Props) {
       const BARS = 48;
       for (let i = 0; i < BARS; i++) {
         const a = (i / BARS) * Math.PI * 2 - Math.PI / 2;
-        const phase = t * (mode === "thinking" ? 0.005 : 0.0015) + i * 0.6;
+        const phase =
+          t * (mode === "thinking" || mode === "speaking" ? 0.005 : 0.0015) + i * 0.6;
         const wobble = 0.55 + 0.45 * (Math.sin(phase) * 0.6 + Math.sin(phase * 1.7 + 2) * 0.4);
         const amp = Math.max(0.06, energy * wobble);
         const r0 = R - 44;

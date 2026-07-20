@@ -26,11 +26,15 @@ First-session bootstrap in progress on branch `feat/bootstrap-core`. Repo went f
 
 Skill library (§5.1), reasoning-memory (§5.2), confidence (§5.3), replay & undo (§5.4). The product identity from the brief is now real, end to end, tested.
 
+## Releases
+
+- v0.1.0 tagged 2026-07-07 (all four hero features). Owner still to click "Create release from tag" on GitHub.
+
 ## Next 3 tasks
 
-1. Record the README GIF — the 10-second screen recording the brief calls for; needs the owner or a screen-recording tool.
-2. Tag v0.1.0: first release with a runnable core + all four hero features (brief §8 says tag once there's a runnable core).
-3. Pick the next milestone with the owner: M2 interface depth (routing/palette expansion, shared-element transitions, voice) vs. M3 autonomy (auto mode with guardrails) vs. memory v1 (vector recall, selective forgetting).
+1. Voice v1 build spike: whisper-rs (cmake) vs. candle pure-Rust Whisper on this machine's x64 toolchain — pick one, then local STT.
+2. Record the README GIF — needs the owner or a screen-recording tool.
+3. M2 continued: wake word + VAD after local STT lands; or pivot to M3 autonomy if the owner prefers.
 
 ## UI state (2026-07-06)
 
