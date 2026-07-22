@@ -30,11 +30,15 @@ Skill library (§5.1), reasoning-memory (§5.2), confidence (§5.3), replay & un
 
 - v0.1.0 tagged 2026-07-07 (all four hero features). Owner still to click "Create release from tag" on GitHub.
 
+## Landing page (2026-07-07)
+
+Premium standalone static landing site at `landing/` (preview: launch config `jarvis-landing`, port 8390). Live-canvas hero + 4 feature showcases + narrative (`landing/STORY.md`) + per-slot generation manifest (`landing/assets/ASSETS.md`). ~28 KB video-free baseline; every video slot ships a designed SVG poster with lazy AV1/WebM+MP4 + reduced-motion plumbing wired. **Blocked on Higgsfield credits (0 on Plus) to generate the actual clips — owner's financial call.**
+
 ## Next 3 tasks
 
-1. Voice v1 build spike: whisper-rs (cmake) vs. candle pure-Rust Whisper on this machine's x64 toolchain — pick one, then local STT.
-2. Record the README GIF — needs the owner or a screen-recording tool.
-3. M2 continued: wake word + VAD after local STT lands; or pivot to M3 autonomy if the owner prefers.
+1. If owner adds Higgsfield credits: generate landing assets per `landing/assets/ASSETS.md` (Veo ambient, Seedance flagship, WAN-restyled undo), encode, drop in, flip `data-has-asset`.
+2. Voice v1 build spike: whisper-rs (cmake) vs. candle pure-Rust Whisper on this machine's x64 toolchain — pick one, then local STT.
+3. Record the README GIF / deploy the landing page (GitHub Pages) — needs the owner.
 
 ## UI state (2026-07-06)
 

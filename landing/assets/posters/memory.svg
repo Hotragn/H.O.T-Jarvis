@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" role="img" aria-label="Points of light drawing faint constellations">
+  <defs>
+    <radialGradient id="mem-bg" cx="50%" cy="45%" r="75%">
+      <stop offset="0%" stop-color="#0a1e2c"/>
+      <stop offset="60%" stop-color="#060d17"/>
+      <stop offset="100%" stop-color="#04070d"/>
+    </radialGradient>
+  </defs>
+  <rect width="800" height="600" fill="url(#mem-bg)"/>
+  <g stroke="#38c6f4" stroke-width="1" opacity="0.3" fill="none">
+    <path d="M160 180 L320 240 L300 400 L500 360 L560 200 L680 300"/>
+    <path d="M320 240 L360 120"/>
+    <path d="M500 360 L520 480"/>
+  </g>
+  <g fill="#56dfb4">
+    <circle cx="160" cy="180" r="4"/>
+    <circle cx="320" cy="240" r="5"/>
+    <circle cx="300" cy="400" r="4"/>
+    <circle cx="500" cy="360" r="5"/>
+    <circle cx="560" cy="200" r="4"/>
+    <circle cx="680" cy="300" r="3.5"/>
+    <circle cx="360" cy="120" r="3"/>
+    <circle cx="520" cy="480" r="3"/>
+  </g>
+  <g fill="#38c6f4" opacity="0.5">
+    <circle cx="220" cy="330" r="1.6"/>
+    <circle cx="430" cy="150" r="1.6"/>
+    <circle cx="610" cy="430" r="1.6"/>
+  </g>
+</svg>

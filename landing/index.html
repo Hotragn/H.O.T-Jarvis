@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>H.O.T-Jarvis — the assistant that grows its own skills</title>
+    <meta
+      name="description"
+      content="An open-source, local-first AI assistant that grows its own skills, remembers how it reasons, tells you when it's unsure, and lets you undo anything — running on your machine, for free."
+    />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="preload" href="styles.css" as="style" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- ==================== HERO ==================== -->
+    <!-- Slot 1: ambient Veo backdrop lives behind the live canvas core.
+         Poster-backed, lazy, reduced-motion-safe; keeps the SVG poster until
+         a real asset exists (data-has-asset flips to true then). -->
+    <header class="hero">
+      <div
+        class="video-slot hero-bg"
+        data-slot="hero-ambient"
+        data-has-asset="false"
+        aria-hidden="true"
+      >
+        <img class="poster" src="assets/posters/hero-ambient.svg" alt="" />
+      </div>
+
+      <canvas id="hero-core" class="hero-core" aria-hidden="true"></canvas>
+
+      <div class="hero-copy">
+        <p class="eyebrow">open source · local-first · free forever</p>
+        <h1>
+          The assistant that <span class="grad">grows its own skills</span>.
+        </h1>
+        <p class="lede">
+          H.O.T-Jarvis writes and tests its own new abilities, remembers how it
+          reasons, tells you when it's unsure, and lets you replay and undo
+          anything it does — running on your machine, for nothing.
+        </p>
+        <div class="cta-row">
+          <a class="btn primary" href="https://github.com/Hotragn/H.O.T-Jarvis"
+            >View on GitHub</a
+          >
+          <a class="btn ghost" href="#skills">See what it does</a>
+        </div>
+        <p class="trust-line">
+          No account. No API bill. Nothing leaves your machine.
+        </p>
+      </div>
+
+      <div class="scroll-hint" aria-hidden="true">scroll</div>
+    </header>
+
+    <main>
+      <!-- ==================== FLAGSHIP ==================== -->
+      <!-- Slot 2: the one cinematic Seedance moment — a skill is born. -->
+      <section class="showcase flagship" id="skills">
+        <div class="showcase-text reveal">
+          <span class="section-index">01</span>
+          <h2>It grows its own skills.</h2>
+          <p>
+            Ask for a new ability and Jarvis writes the code <em>and</em> a test
+            for it, proves the test passes, and refines on failure. Skills that
+            can't prove themselves are flagged and refuse to run. The library
+            compounds — every session, it can do a little more.
+          </p>
+        </div>
+        <figure
+          class="video-slot cinema reveal"
+          data-slot="skill-born"
+          data-has-asset="false"
+        >
+          <img
+            class="poster"
+            src="assets/posters/skill-born.svg"
+            alt="A glowing core emitting a skill card that self-tests and locks in with a check mark."
+          />
+          <figcaption class="slot-note">flagship sequence · Seedance 2.0</figcaption>
+        </figure>
+      </section>
+
+      <!-- ==================== FEATURE LOOPS ==================== -->
+      <section class="showcase alt">
+        <figure
+          class="video-slot loop reveal"
+          data-slot="memory"
+          data-has-asset="false"
+        >
+          <img
+            class="poster"
+            src="assets/posters/memory.svg"
+            alt="Points of light drawing faint constellations in dark space."
+          />
+        </figure>
+        <div class="showcase-text reveal">
+          <span class="section-index">02</span>
+          <h2>It remembers how it reasons.</h2>
+          <p>
+            Jarvis re-reads its own action log and keeps short lessons about what
+            worked and what failed. Those lessons ride along in future prompts,
+            so it improves from its own experience — not just from what you tell
+            it.
+          </p>
+        </div>
+      </section>
+
+      <section class="showcase">
+        <div class="showcase-text reveal">
+          <span class="section-index">03</span>
+          <h2>It tells you when it's unsure.</h2>
+          <p>
+            Every answer carries the model's own confidence. Below a threshold,
+            Jarvis asks a clarifying question instead of guessing. The gauge
+            lives on the core, so you always know how much to trust the last
+            thing it said.
+          </p>
+        </div>
+        <figure
+          class="video-slot loop reveal"
+          data-slot="confidence"
+          data-has-asset="false"
+        >
+          <img
+            class="poster"
+            src="assets/posters/confidence.svg"
+            alt="A thin arc of light filling a circular gauge and settling."
+          />
+        </figure>
+      </section>
+
+      <section class="showcase alt">
+        <figure
+          class="video-slot loop reveal"
+          data-slot="undo"
+          data-has-asset="false"
+        >
+          <img
+            class="poster"
+            src="assets/posters/undo.svg"
+            alt="A timeline of actions with one step reversing."
+          />
+          <figcaption class="slot-note">real UI · restyled with WAN 2.6</figcaption>
+        </figure>
+        <div class="showcase-text reveal">
+          <span class="section-index">04</span>
+          <h2>You can undo anything.</h2>
+          <p>
+            Every action is recorded with enough state to reverse it. Undo a
+            chat turn, a saved note, or a skill change from the timeline — and
+            run a replay audit that proves the log reproduces memory exactly.
+            Nothing it does is permanent unless you want it to be.
+          </p>
+        </div>
+      </section>
+
+      <!-- ==================== CLOSE ==================== -->
+      <section class="close reveal">
+        <h2>It's yours. And it's free.</h2>
+        <p>
+          Local by default — inference runs on your own machine through Ollama,
+          with free cloud tiers only as a fallback. No paid API is ever
+          required, and your data never has to leave the room.
+        </p>
+        <div class="cta-row center">
+          <a class="btn primary" href="https://github.com/Hotragn/H.O.T-Jarvis"
+            >Get it on GitHub</a
+          >
+        </div>
+        <p class="trust-line">Apache-2.0 · Windows &amp; macOS · built in the open</p>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <span>H.O.T-Jarvis</span>
+      <span class="dim">local-first · free forever</span>
+    </footer>
+
+    <script type="module" src="core.js"></script>
+    <script type="module" src="reveal.js"></script>
+  </body>
+</html>

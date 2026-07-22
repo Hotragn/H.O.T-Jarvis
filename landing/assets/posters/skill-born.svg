@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" role="img" aria-label="A glowing core emitting a skill card that locks in with a check">
+  <defs>
+    <radialGradient id="sb-bg" cx="38%" cy="50%" r="75%">
+      <stop offset="0%" stop-color="#0b2130"/>
+      <stop offset="60%" stop-color="#060d17"/>
+      <stop offset="100%" stop-color="#04070d"/>
+    </radialGradient>
+    <radialGradient id="sb-iris" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#7fe7ff"/>
+      <stop offset="55%" stop-color="#38c6f4"/>
+      <stop offset="100%" stop-color="#38c6f4" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1280" height="720" fill="url(#sb-bg)"/>
+  <!-- core -->
+  <g transform="translate(430 360)">
+    <circle r="150" fill="none" stroke="#38c6f4" stroke-width="1" opacity="0.25"/>
+    <circle r="120" fill="none" stroke="#38c6f4" stroke-width="1.4" opacity="0.4" stroke-dasharray="230 90"/>
+    <circle r="92" fill="none" stroke="#56dfb4" stroke-width="1.4" opacity="0.5" stroke-dasharray="60 260"/>
+    <circle r="52" fill="url(#sb-iris)"/>
+    <circle r="52" fill="none" stroke="#7fe7ff" stroke-width="2" opacity="0.85"/>
+    <circle r="5" fill="#eaffff"/>
+  </g>
+  <!-- connective traces -->
+  <g stroke="#38c6f4" stroke-width="1.2" opacity="0.35" fill="none">
+    <path d="M600 360 L760 330"/>
+    <path d="M600 392 L760 470"/>
+  </g>
+  <!-- skill card, proven -->
+  <g transform="translate(770 250)">
+    <rect width="330" height="220" rx="14" fill="#081420" stroke="#38c6f4" stroke-opacity="0.4"/>
+    <rect x="24" y="30" width="180" height="10" rx="5" fill="#38c6f4" opacity="0.55"/>
+    <rect x="24" y="58" width="250" height="8" rx="4" fill="#64788f" opacity="0.5"/>
+    <rect x="24" y="80" width="220" height="8" rx="4" fill="#64788f" opacity="0.4"/>
+    <rect x="24" y="102" width="240" height="8" rx="4" fill="#64788f" opacity="0.4"/>
+    <circle cx="286" cy="176" r="22" fill="#56dfb4" opacity="0.16"/>
+    <path d="M276 176 l7 8 l14 -18" fill="none" stroke="#56dfb4" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="24" y="182" font-family="monospace" font-size="12" fill="#56dfb4" letter-spacing="2">TEST PASSED</text>
+  </g>
+</svg>

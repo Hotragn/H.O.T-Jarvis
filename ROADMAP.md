@@ -46,6 +46,13 @@ Machine-readable task queue. Status: `ready` | `in-progress` | `done` | `blocked
 - [ ] `blocked (needs CI + guardrails proven)` Auto mode: scheduler loop over this roadmap with resource caps, kill switch, dry-run gates
 - [ ] `ready` Research-to-feature loop: scan agent papers, propose issues
 
+## Distribution / front door
+
+- [x] `done` Premium landing page (standalone static site, `landing/`): live-canvas hero, four feature showcases, narrative design, performance-correct lazy video plumbing, designed posters in every slot. ~28 KB video-free baseline.
+- [ ] `blocked (needs Higgsfield credits — owner's call)` Generate the cinematic assets per `landing/assets/ASSETS.md`: Veo ambient loops, the Seedance flagship, WAN-restyled undo capture.
+- [ ] `ready` Deploy the landing page (GitHub Pages from `landing/`).
+- [ ] `ready` README GIF / hero — the 10-second screen recording (needs owner or screen capture).
+
 ## Chores
 
 - [x] `done` Export completeness: events + notes in the memory export; wipe also clears the event log

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1680 720" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Dark volumetric field with drifting light">
+  <defs>
+    <radialGradient id="ha-glow" cx="50%" cy="40%" r="70%">
+      <stop offset="0%" stop-color="#0e2a3a"/>
+      <stop offset="55%" stop-color="#060d17"/>
+      <stop offset="100%" stop-color="#04070d"/>
+    </radialGradient>
+  </defs>
+  <rect width="1680" height="720" fill="url(#ha-glow)"/>
+  <g fill="#38c6f4">
+    <circle cx="230" cy="180" r="1.6" opacity="0.5"/>
+    <circle cx="470" cy="520" r="1.2" opacity="0.35"/>
+    <circle cx="760" cy="120" r="2" opacity="0.6"/>
+    <circle cx="980" cy="600" r="1.4" opacity="0.4"/>
+    <circle cx="1240" cy="260" r="1.8" opacity="0.5"/>
+    <circle cx="1460" cy="470" r="1.2" opacity="0.3"/>
+    <circle cx="620" cy="330" r="1" opacity="0.3"/>
+    <circle cx="1120" cy="420" r="1" opacity="0.35"/>
+  </g>
+  <g stroke="#38c6f4" stroke-width="1" opacity="0.06">
+    <line x1="0" y1="240" x2="1680" y2="232"/>
+    <line x1="0" y1="420" x2="1680" y2="430"/>
+    <line x1="0" y1="560" x2="1680" y2="548"/>
+  </g>
+</svg>
