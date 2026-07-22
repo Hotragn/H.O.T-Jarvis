@@ -36,18 +36,22 @@ surgical.
 Only one flagship sequence. Everything else is ambient or restyled-real. No
 recurring character is needed (no face), so **Kling is intentionally unused**.
 
+Model choices reflect what's actually in the owner's **7-Day Unlimited** pass
+(confirmed 2026-07-07). Veo is *not* in it, so the atmospheric loops use
+**Kling 3.0 at 1080p** — higher-res than Veo would have given us here anyway.
+
 | # | Slot | Feeling | Model | Why this model | Spec |
 |---|------|---------|-------|----------------|------|
 | — | Hero core | calm power | **none — live `<canvas>`** | Zero asset, zero bytes, genuinely premium and interactive. The real arc-reactor. | runs now |
-| 1 | Hero ambient backdrop | calm power | **Veo 3.1** | Strongest at atmospheric/environmental loops | 21:9, ~8s seamless, muted, behind the canvas |
-| 2 | Flagship: a skill is born | aliveness + earned trust | **Seedance 2.0** | Highest-fidelity multi-shot; this is *the* cinematic moment | 16:9, 12–15s, start/end keyframes first, `genre: epic` |
-| 3 | Reasoning-memory ambient | depth | **Veo 3.1** | Atmospheric: drifting light forming constellations | 16:9, ~6s loop, muted |
-| 4 | Confidence gauge motion | trust | **Veo 3.1** | Atmospheric arc filling with light | 16:9, ~5s loop, muted |
-| 5 | Replay & undo — restyled real UI | precision | **WAN 2.6** | Restyles an actual screen recording of the undo timeline into the holographic aesthetic — authentic but clearly stylized | from real capture |
-| — | Section dividers | continuity | **MiniMax** (drafts only) | Fast/cheap iteration; upgrade to Veo if kept | short loops |
+| 1 | Hero ambient backdrop | calm power | **Kling 3.0** (1080p) | Best atmospheric loop in the unlimited set | 16:9, ~10s seamless, muted, behind the canvas |
+| 2 | Flagship: a skill is born | aliveness + earned trust | **Seedance 2.0** (720p, 15s) | Highest-fidelity multi-shot; this is *the* cinematic moment | 16:9, 15s, start/end keyframes first, `genre: epic` |
+| 3 | Reasoning-memory ambient | depth | **Kling 3.0** (1080p) | Atmospheric: drifting light forming constellations | 16:9, ~10s loop, muted |
+| 4 | Confidence gauge motion | trust | **Kling 3.0** (1080p) | Atmospheric arc filling with light | 16:9, ~10s loop, muted |
+| 5 | Replay & undo — restyled real UI | precision | **Wan 2.7** (1080p) | Restyles an actual screen recording of the undo timeline into the holographic aesthetic — authentic but clearly stylized | from real capture |
+| — | Keyframes (slots 1–4) | — | **Nano Banana Pro** (2K) | Precise composition and control for start/end frames | 16:9 stills |
 
-Iterate cheap, finish expensive: draft any slot on **MiniMax** to judge
-composition, then regenerate the keepers on Veo/Seedance. Never ship a
+Generate keyframes first, then feed them as start/end frames to the video
+model — far more control than a freeform prompt. Never ship a
 watermarked/free-tier render on this page.
 
 ## Keyframe-first rule
