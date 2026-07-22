@@ -37,7 +37,8 @@ Machine-readable task queue. Status: `ready` | `in-progress` | `done` | `blocked
 - [x] `done` Skill library view with per-skill test status, create form, run panel
 - [ ] `ready` Reflection browser (needs reasoning-memory, M1)
 - [ ] `ready` Animated shared-element transitions between views
-- [ ] `ready` Voice v0: local STT (whisper.cpp/faster-whisper) + local TTS (Piper/Kokoro), optional and gracefully degrading
+- [x] `done` Voice v0: spoken replies via OS voices (free, offline), voice toggle, barge-in, speaking/listening core states, push-to-talk where the platform provides recognition, honest fallback where it doesn't
+- [ ] `ready` Voice v1: fully local STT (Whisper on-device) so voice input works inside WebView2; then wake word + VAD + continuous conversation
 - [ ] `ready` System tray + global hotkey + launch-at-login
 
 ## M3 — Autonomy

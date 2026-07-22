@@ -21,6 +21,14 @@ import {
   THEME_STORAGE_KEY,
   type Theme,
 } from "./lib/theme";
+import {
+  recognitionCtor,
+  speak,
+  stopSpeaking,
+  STT_UNAVAILABLE_MESSAGE,
+  sttAvailable,
+  ttsAvailable,
+} from "./lib/voice";
 import EventsView from "./views/EventsView";
 import MemoryView from "./views/MemoryView";
 import NotesView from "./views/NotesView";
@@ -72,8 +80,14 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [lastConfidence, setLastConfidence] = useState<number | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [voiceOn, setVoiceOn] = useState(
+    () => ttsAvailable && localStorage.getItem("jarvis.voice") === "on",
+  );
+  const [speaking, setSpeaking] = useState(false);
+  const [listening, setListening] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLInputElement>(null);
+  const recognizerRef = useRef<{ stop: () => void } | null>(null);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -153,9 +167,64 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  const toggleVoice = useCallback(() => {
+    setVoiceOn((on) => {
+      const next = !on;
+      localStorage.setItem("jarvis.voice", next ? "on" : "off");
+      if (!next) {
+        stopSpeaking();
+        setSpeaking(false);
+      }
+      return next;
+    });
+  }, []);
+
+  // Push-to-talk: click to listen, click again (or silence) to stop.
+  const toggleListening = useCallback(() => {
+    if (listening) {
+      recognizerRef.current?.stop();
+      return;
+    }
+    const Ctor = recognitionCtor();
+    if (!Ctor) {
+      setItems((prev) => [
+        ...prev,
+        { key: `s-${Date.now()}`, role: "system", content: STT_UNAVAILABLE_MESSAGE },
+      ]);
+      return;
+    }
+    stopSpeaking(); // barge-in: listening interrupts speech
+    setSpeaking(false);
+    const recognizer = new Ctor();
+    recognizer.lang = "en-US";
+    recognizer.interimResults = true;
+    recognizer.maxAlternatives = 1;
+    recognizer.onresult = (e) => {
+      const transcript = Array.from({ length: e.results.length })
+        .map((_, i) => e.results[i][0].transcript)
+        .join(" ")
+        .trim();
+      setDraft(transcript);
+    };
+    recognizer.onend = () => {
+      setListening(false);
+      recognizerRef.current = null;
+      composerRef.current?.focus();
+    };
+    recognizer.onerror = () => {
+      setListening(false);
+      recognizerRef.current = null;
+    };
+    recognizerRef.current = recognizer;
+    setListening(true);
+    recognizer.start();
+  }, [listening]);
+
   const send = useCallback(async () => {
     const text = draft.trim();
     if (!text || busy) return;
+    stopSpeaking(); // barge-in: a new message cuts Jarvis off
+    setSpeaking(false);
     setDraft("");
     setItems((prev) => [
       ...prev,
@@ -165,6 +234,12 @@ export default function App() {
     try {
       const reply = await chatSend(text);
       setLastConfidence(reply.confidence);
+      if (voiceOn) {
+        speak(reply.content, {
+          onstart: () => setSpeaking(true),
+          onend: () => setSpeaking(false),
+        });
+      }
       const conf = confidenceLabel(reply.confidence);
       setItems((prev) => [
         ...prev,
@@ -187,14 +262,18 @@ export default function App() {
     } finally {
       setBusy(false);
     }
-  }, [draft, busy]);
+  }, [draft, busy, voiceOn]);
 
   const pill = describeStatus(status);
   const coreState: CoreState = busy
     ? "thinking"
-    : status?.ready
-      ? "idle"
-      : "offline";
+    : listening
+      ? "listening"
+      : speaking
+        ? "speaking"
+        : status?.ready
+          ? "idle"
+          : "offline";
   const messageCount = telemetry?.message_count ?? status?.message_count ?? 0;
   const factCount = telemetry?.fact_count ?? status?.fact_count ?? 0;
 
@@ -219,6 +298,17 @@ export default function App() {
             </button>
           ))}
         </nav>
+        {ttsAvailable && (
+          <button
+            type="button"
+            className="theme-toggle"
+            data-active={voiceOn}
+            onClick={toggleVoice}
+            aria-label={voiceOn ? "turn voice replies off" : "turn voice replies on"}
+          >
+            {voiceOn ? "voice on" : "voice off"}
+          </button>
+        )}
         <button
           type="button"
           className="theme-toggle"
@@ -331,10 +421,21 @@ export default function App() {
                 className="chat-input"
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                placeholder="Talk to Jarvis…"
+                placeholder={listening ? "Listening…" : "Talk to Jarvis…"}
                 aria-label="message"
                 autoFocus
               />
+              <button
+                type="button"
+                className="mic-btn"
+                data-active={listening}
+                data-supported={sttAvailable}
+                title={sttAvailable ? "push to talk" : "voice input not available here yet"}
+                aria-label={listening ? "stop listening" : "start voice input"}
+                onClick={toggleListening}
+              >
+                {listening ? "◉" : "🎙"}
+              </button>
               <button
                 className="send-btn"
                 type="submit"
