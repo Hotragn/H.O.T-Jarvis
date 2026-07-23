@@ -56,6 +56,14 @@ Groundwork planned in [docs/ios/README.md](docs/ios/README.md). Build/submit nee
 - [ ] `blocked (needs $99 enrollment)` App Store Connect record, TestFlight, submission
 - [ ] `ready` iOS UI pass: safe-area insets, touch targets, hide desktop-only telemetry; native AVSpeech/SFSpeech voice plugin
 
+## Distribution / front door
+
+- [x] `done` Premium landing page (standalone static site, `landing/`): live-canvas hero, four feature showcases, narrative design, performance-correct lazy video plumbing, designed posters in every slot. ~28 KB video-free baseline.
+- [x] `done` Flagship cinematic ("a skill is born") rendered free via HyperFrames (HTML→MP4), 1080p/12s, wired into the hero slot.
+- [ ] `ready` Render the remaining loops (hero ambient, memory, confidence, undo) the same way — HyperFrames per `landing/assets/ASSETS.md`.
+- [ ] `ready` Deploy the landing page (GitHub Pages from `landing/`).
+- [ ] `ready` README GIF / hero — the 10-second screen recording (needs owner or screen capture).
+
 ## Chores
 
 - [x] `done` Export completeness: events + notes in the memory export; wipe also clears the event log
