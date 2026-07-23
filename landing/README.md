@@ -20,15 +20,21 @@ python -m http.server 8080
 - `reveal.js` — scroll reveals and lazy, reduced-motion-aware video loading.
 - `styles.css` — the instrument design language (dark steel, hairlines, one glow).
 - `assets/posters/*.svg` — designed art filling every reserved video slot. These are the current experience *and* the poster / reduced-motion / load fallback.
-- `assets/video/` — where generated clips land (empty until generated).
+- `assets/video/` — rendered clips. `skill-born.mp4` (the flagship) is rendered; others land here as they're produced.
+- `motion/` — HyperFrames source projects (HTML/CSS/GSAP) that render the clips to MP4, free and locally. See `motion/skill-born/index.html` for the flagship composition.
 - [STORY.md](STORY.md) — the narrative design: the feeling arc and which model serves which moment.
 - [assets/ASSETS.md](assets/ASSETS.md) — per-slot generation manifest with exact prompts.
 
-## Adding a generated clip (when credits exist)
+## Adding a generated clip (free, via HyperFrames)
 
-1. Generate per [assets/ASSETS.md](assets/ASSETS.md) (keyframes first for narrative slots).
-2. Encode for web (AV1/WebM + MP4 fallback, sized to display) and drop both at `assets/video/<slot>.{webm,mp4}`.
-3. In `index.html`, set `data-has-asset="true"` on that slot. Done — `reveal.js` lazy-loads it into view, keeps the poster until it can play, and still shows the poster under reduced motion.
+Clips are HTML/CSS/GSAP compositions rendered to MP4 with HyperFrames — no paid
+service. Full per-slot recipe in [assets/ASSETS.md](assets/ASSETS.md). In short:
+
+1. Author/edit the composition under `motion/<slot>/index.html`.
+2. `cd motion/<slot> && npx hyperframes check && npx hyperframes render . -q draft -o ./renders/video.mp4`
+   (needs `ffmpeg` on PATH; the render also uses a headless Chromium).
+3. Copy `renders/video.mp4` → `assets/video/<slot>.mp4` and set `data-has-asset="true"` on that slot in `index.html`.
+   `reveal.js` lazy-loads it into view, keeps the poster until it can play, and still shows the poster under reduced motion.
 
 ## Deploy
 

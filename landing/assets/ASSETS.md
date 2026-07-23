@@ -1,39 +1,38 @@
-# Asset manifest — generate these with your 7-Day Unlimited
+# Asset manifest — rendered locally with HyperFrames (free, HTML→MP4)
 
-Status: **0 assets generated.** Verified 2026-07-07 that the 7-Day Unlimited
-pass covers the **Higgsfield web app** but NOT MCP/API generation — the MCP
-path bills against workspace credits (0 here), so a keyframe preflighted at 2
-credits and submits failed. So generate these **in the web app** (where your
-pass applies, at no extra cost), then drop the files in and flip the slot on.
+Pivot (2026-07-07): dropped Higgsfield (its 7-Day Unlimited pass covers the web
+app but not MCP/API generation, which bills 0-balance workspace credits). The
+assets are now authored as **HTML/CSS/GSAP compositions and rendered to MP4 with
+HyperFrames** — free, deterministic, on this machine (Playwright Chromium +
+ffmpeg). Sources live under `../motion/<slot>/`; render with
+`npx hyperframes render` and copy the MP4 into `video/`.
 
-Every slot is already wired in the page with a designed SVG poster and
-lazy/reduced-motion plumbing. To light one up: save the clip to the listed
-path and set `data-has-asset="true"` on that slot in `index.html`.
+Every slot is wired in the page with a designed SVG poster + lazy/reduced-motion
+plumbing. To light one up: render, save `<slot>.mp4` to `assets/video/`, set
+`data-has-asset="true"` on that slot in `index.html`.
 
-## Models mapped to your actual unlimited lineup
-(Veo is not in your pass, so the ambient loops use **Kling 3.0 1080p**, which
-is higher-res anyway. Keyframes use **Nano Banana Pro** — 2K, precise.)
+## Status
 
-| Slot | Model (in your unlimited) | Output |
-|------|---------------------------|--------|
-| keyframes | Nano Banana Pro | 2K stills, 16:9 |
-| 1 hero ambient | Kling 3.0 (1080p, 10s) | seamless loop |
-| 2 flagship | Seedance 2.0 (720p, 15s) | start+end keyframes |
-| 3 memory | Kling 3.0 (1080p, 10s) | loop |
-| 4 confidence | Kling 3.0 (1080p, 10s) | loop |
-| 5 undo restyle | Wan 2.7 (1080p, 10s) | restyle a real capture |
+| Slot | Feeling | Source | Status |
+|------|---------|--------|--------|
+| 2 flagship — a skill is born | aliveness + trust | `../motion/skill-born/` | ✅ **rendered** — 1080p, 12s, 1.16 MB, wired in |
+| 1 hero ambient | calm power | `../motion/hero-ambient/` (todo) | poster only |
+| 3 memory | depth | `../motion/memory/` (todo) | poster only |
+| 4 confidence | trust | `../motion/confidence/` (todo) | poster only |
+| 5 undo | precision | screen capture + overlay | poster only |
 
-## Web-app workflow
-1. In the Higgsfield web app, generate each slot with the model + prompt below.
-   For slots 1–4 generate the two **keyframes first** (Nano Banana Pro), then
-   feed them as start/end frames to the video model — far more control.
-2. Download the MP4. Name it `<slot>.mp4` (e.g. `skill-born.mp4`) and drop it in
-   `assets/video/`.
-3. In `index.html`, set `data-has-asset="true"` on that slot.
-4. (Optional, later) once `ffmpeg` is installed, also make a WebM/AV1:
-   `ffmpeg -i skill-born.mp4 -c:v libaom-av1 -crf 34 -b:v 0 -an skill-born.webm`
-   MP4 alone plays in every browser; WebM is just a smaller-bytes optimization.
-   Keep each loop under ~2.5 MB transferred.
+## Render workflow (per slot)
+1. `npx hyperframes init landing/motion/<slot> --non-interactive --example=blank`
+2. Author `index.html`: a paused GSAP timeline on `window.__timelines["main"]`,
+   canvas/DOM driven by timeline time (seek-safe, deterministic). Vendor GSAP
+   locally (no CDN). Use `monospace`/`Roboto` (renderer-bundled fonts) and
+   transforms only (`x/y/scale/opacity`), never layout props like `top`.
+3. `npx hyperframes check` → fix lint (motion/fonts/contrast) → `render`.
+4. Copy `renders/video.mp4` → `assets/video/<slot>.mp4`; flip `data-has-asset`.
+5. (Optional) smaller WebM/AV1: `ffmpeg -i <slot>.mp4 -c:v libaom-av1 -crf 34 -b:v 0 -an <slot>.webm`
+   and set `data-webm="true"` on the slot. MP4 alone plays everywhere.
+
+Keep each clip within its budget (hero/flagship ≤ ~2 MB, loops ≤ ~1 MB).
 
 ---
 

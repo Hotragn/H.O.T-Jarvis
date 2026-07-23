@@ -38,13 +38,18 @@ function attachVideo(slot) {
   video.preload = "auto";
   if (poster) video.poster = poster.getAttribute("src");
 
-  const webm = document.createElement("source");
-  webm.src = `assets/video/${name}.webm`;
-  webm.type = "video/webm";
+  // AV1/WebM first when a slot advertises one (data-webm="true"), else the
+  // MP4 that plays everywhere. We only emit sources that exist, so no 404s.
+  if (slot.dataset.webm === "true") {
+    const webm = document.createElement("source");
+    webm.src = `assets/video/${name}.webm`;
+    webm.type = "video/webm";
+    video.append(webm);
+  }
   const mp4 = document.createElement("source");
   mp4.src = `assets/video/${name}.mp4`;
   mp4.type = "video/mp4";
-  video.append(webm, mp4);
+  video.append(mp4);
 
   // Only swap the poster out once the clip can actually play, so a missing or
   // slow asset never leaves an empty box.

@@ -2,6 +2,28 @@
 
 One short entry per meaningful decision. Newest at the top. Cite sources for ideas borrowed from papers or other projects (ideas only — implementations here are original).
 
+## 2026-07-07 — Landing video: HyperFrames (HTML→MP4), not Higgsfield
+
+Higgsfield is out: its 7-Day Unlimited pass covers the web app but not MCP/API
+generation (which bills 0-balance workspace credits — verified, submits failed).
+Pivoted the cinematic assets to **HyperFrames**: author each as an HTML/CSS/GSAP
+composition and render to MP4 locally and free (Playwright Chromium + ffmpeg).
+This fits the project's free-forever ethos better than a paid video API, and the
+sources are committed (reproducible/editable) under `landing/motion/<slot>/`.
+The flagship "a skill is born" (arc-reactor core → emits skill card → scanline
+self-test → green check → settle) is rendered: 1080p, 12s, 1.16 MB, wired into
+the landing page and frame-verified (core region 94% cyan, near-black bg).
+Requirements learned: vendor GSAP locally (CDN caused render nav-timeout),
+transforms-only motion (not `top`), renderer-bundled fonts, AA contrast — all
+enforced by `hyperframes check`. Installed ffmpeg via winget (Gyan.FFmpeg) since
+HyperFrames' encode needs ffmpeg+ffprobe on PATH.
+
+Plugin/skill installs the user listed (`/plugin ...`, `npx skills add ...`) were
+NOT run: `/plugin` is an interactive CLI dialog unavailable in this session, and
+both install into global/user Claude scope, which the project constitution (§12)
+forbids the agent from doing — that's the owner's call in an interactive shell.
+HyperFrames was already available as project skills, so it covered the need.
+
 ## 2026-07-07 — Premium front door lives on a landing page, not in the app
 
 Asked to make Jarvis a premium experience with Higgsfield-generated video. Key scope call: cinematic video does **not** belong inside the desktop app — the constitution requires offline-first, 60fps, free-forever, "premium means powerful not bloated," so autoplaying heavy clips in the HUD is a regression by our own standard. The genuine missed opportunity is that the project has **no public landing page** — the front door that turns a visitor into a stargazer, and the one place every performance rule (WebM/AV1, lazy-load, Core Web Vitals, prefers-reduced-motion) actually applies. Built it as a standalone static site under `landing/` (no framework, no build) so it can never touch the app bundle or offline guarantees; instant load *is* the premium signal (~28 KB uncompressed, video-free baseline).
