@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 64" role="img" aria-label="H.O.T-Jarvis">
+  <title>H.O.T-Jarvis</title>
+  <defs>
+    <linearGradient id="lk-cyan" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7fe7ff"/>
+      <stop offset="1" stop-color="#2aa8e0"/>
+    </linearGradient>
+  </defs>
+  <!-- mark -->
+  <g fill="none" stroke-linecap="round">
+    <path d="M54 32 A22 22 0 0 1 32 54" stroke="url(#lk-cyan)" stroke-width="5.5"/>
+    <path d="M21 51.05 A22 22 0 0 1 12.95 21" stroke="url(#lk-cyan)" stroke-width="5.5"/>
+    <path d="M21 12.95 A22 22 0 0 1 51.05 21" stroke="#56dfb4" stroke-width="5.5"/>
+    <path d="M51.05 21 L58 16.6" stroke="#56dfb4" stroke-width="4"/>
+  </g>
+  <circle cx="32" cy="32" r="5" fill="url(#lk-cyan)"/>
+  <!-- wordmark -->
+  <text x="82" y="40" font-family="'Geist','Inter',system-ui,sans-serif" font-size="26" letter-spacing="2">
+    <tspan fill="#eaf3fb" font-weight="600">H.O.T</tspan><tspan fill="#8aa0b6" font-weight="400">-JARVIS</tspan>
+  </text>
+</svg>
