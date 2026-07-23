@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" role="img" aria-label="An arc of light filling a circular gauge">
+  <defs>
+    <radialGradient id="cf-bg" cx="50%" cy="50%" r="75%">
+      <stop offset="0%" stop-color="#0a1e2c"/>
+      <stop offset="60%" stop-color="#060d17"/>
+      <stop offset="100%" stop-color="#04070d"/>
+    </radialGradient>
+  </defs>
+  <rect width="800" height="600" fill="url(#cf-bg)"/>
+  <g transform="translate(400 300)">
+    <!-- gauge track: 270 deg from 135deg -->
+    <path d="M -134 134 A 190 190 0 1 1 134 134" fill="none" stroke="#1b2a38" stroke-width="10" stroke-linecap="round"/>
+    <!-- filled portion ~78% -->
+    <path d="M -134 134 A 190 190 0 1 1 178 -66" fill="none" stroke="#38c6f4" stroke-width="10" stroke-linecap="round"/>
+    <text x="0" y="8" text-anchor="middle" font-family="monospace" font-size="64" fill="#d9e7f2" letter-spacing="2">78</text>
+    <text x="0" y="52" text-anchor="middle" font-family="monospace" font-size="16" fill="#64788f" letter-spacing="6">CONFIDENCE</text>
+  </g>
+</svg>

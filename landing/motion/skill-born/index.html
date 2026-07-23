@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: #04070d; }
+      body { font-family: "Roboto", system-ui, sans-serif; }
+      .mono { font-family: monospace; }
+
+      #stage { position: absolute; inset: 0; }
+      #core { position: absolute; inset: 0; }
+
+      /* holographic skill card */
+      #card {
+        position: absolute;
+        left: 1090px; top: 372px;
+        width: 520px; height: 336px;
+        border: 1px solid rgba(129,190,232,0.4);
+        border-radius: 16px;
+        background: rgba(8,20,32,0.72);
+        box-shadow: 0 30px 90px rgba(0,2,8,0.6);
+        overflow: hidden;
+        opacity: 0;
+      }
+      #card .title { position: absolute; left: 34px; top: 34px; width: 300px; height: 14px;
+        border-radius: 7px; background: #38c6f4; opacity: 0.7; }
+      #card .row { position: absolute; left: 34px; height: 10px; border-radius: 5px;
+        background: #64788f; opacity: 0; }
+      #card .r1 { top: 78px; width: 420px; }
+      #card .r2 { top: 104px; width: 360px; }
+      #card .r3 { top: 130px; width: 398px; }
+      #card .r4 { top: 156px; width: 300px; }
+
+      /* scanline sweeping the card during self-test */
+      #scan { position: absolute; left: 0; width: 100%; height: 120px; top: 0;
+        background: linear-gradient(180deg, transparent, rgba(56,198,244,0.28), transparent);
+        opacity: 0; will-change: transform; }
+
+      /* verdict */
+      #verdict { position: absolute; left: 34px; bottom: 30px; display: flex; align-items: center; gap: 14px; opacity: 0; }
+      #check { width: 46px; height: 46px; border-radius: 50%; background: rgba(86,223,180,0.16);
+        display: grid; place-items: center; transform: scale(0.4); }
+      #check svg { width: 26px; height: 26px; }
+      #verdict .label { font-size: 15px; letter-spacing: 4px; color: #56dfb4; }
+
+      #brand { position: absolute; left: 120px; bottom: 96px; opacity: 0; }
+      #brand .name { font-size: 30px; letter-spacing: 12px; color: #d9e7f2; }
+      #brand .sub { font-family: monospace; font-size: 13px; letter-spacing: 6px;
+        color: #93a4b8; margin-top: 10px; text-transform: uppercase; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="12" data-width="1920" data-height="1080">
+      <div id="stage" class="clip" data-start="0" data-duration="12" data-track-index="0">
+        <canvas id="core" width="1920" height="1080"></canvas>
+
+        <div id="card">
+          <div class="title"></div>
+          <div class="row r1"></div>
+          <div class="row r2"></div>
+          <div class="row r3"></div>
+          <div class="row r4"></div>
+          <div id="scan"></div>
+          <div id="verdict">
+            <div id="check">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M5 12.5 l4 4 l10 -11" stroke="#56dfb4" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="label mono">TEST PASSED</div>
+          </div>
+        </div>
+
+        <div id="brand">
+          <div class="name">H.O.T-JARVIS</div>
+          <div class="sub">it grows its own skills</div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // ---- arc-reactor core, driven purely by timeline time (seek-safe) ----
+      const canvas = document.getElementById("core");
+      const ctx = canvas.getContext("2d");
+      const CX = 660, CY = 540, R = 300;
+      const ACCENT = "#38c6f4", ACCENT2 = "#56dfb4";
+
+      // state the timeline drives
+      const S = { t: 0, intro: 0, emit: 0, settle: 0 };
+
+      function drawCore() {
+        const t = S.t; // ms
+        ctx.clearRect(0, 0, 1920, 1080);
+        const breath = 0.5 + 0.5 * Math.sin(t * 0.0016);
+        const spin = 0.00026;
+        const energy = 0.32 + 0.22 * S.intro; // grows as it wakes
+        const a0 = S.intro; // master fade-in
+
+        // outer tick ring
+        for (let i = 0; i < 72; i++) {
+          const a = (i / 72) * Math.PI * 2 + t * spin;
+          const major = i % 6 === 0;
+          const lit = (i * 7) % 13 < 4;
+          const len = major ? 16 : 8;
+          ctx.strokeStyle = lit ? ACCENT2 : ACCENT;
+          ctx.globalAlpha = a0 * (lit ? 0.5 + 0.4 * breath : major ? 0.5 : 0.22);
+          ctx.lineWidth = major ? 2 : 1;
+          ctx.beginPath();
+          ctx.moveTo(CX + Math.cos(a) * (R - len), CY + Math.sin(a) * (R - len));
+          ctx.lineTo(CX + Math.cos(a) * R, CY + Math.sin(a) * R);
+          ctx.stroke();
+        }
+        // counter-rotating arcs
+        const arc = (rad, st, sw, w, al) => {
+          ctx.strokeStyle = ACCENT; ctx.globalAlpha = a0 * al; ctx.lineWidth = w;
+          ctx.beginPath(); ctx.arc(CX, CY, rad, st, st + sw); ctx.stroke();
+        };
+        arc(R - 24, t * spin * 2.4, Math.PI * 0.62, 3, 0.8);
+        arc(R - 24, t * spin * 2.4 + Math.PI, Math.PI * 0.2, 3, 0.5);
+        arc(R - 36, -t * spin * 1.6, Math.PI * 0.34, 1.4, 0.55);
+        ctx.globalAlpha = a0 * 0.28; ctx.strokeStyle = ACCENT; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(CX, CY, R - 48, 0, Math.PI * 2); ctx.stroke();
+
+        // radial voice bars
+        for (let i = 0; i < 60; i++) {
+          const a = (i / 60) * Math.PI * 2 - Math.PI / 2;
+          const phase = t * 0.0015 + i * 0.6;
+          const wob = 0.55 + 0.45 * (Math.sin(phase) * 0.6 + Math.sin(phase * 1.7 + 2) * 0.4);
+          const amp = Math.max(0.06, energy * wob);
+          const r0 = R - 66, r1 = r0 + amp * 20;
+          ctx.strokeStyle = ACCENT; ctx.globalAlpha = a0 * (0.22 + amp * 0.6); ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(CX + Math.cos(a) * r0, CY + Math.sin(a) * r0);
+          ctx.lineTo(CX + Math.cos(a) * r1, CY + Math.sin(a) * r1);
+          ctx.stroke();
+        }
+
+        // connective trace core -> card, draws in as the skill emits
+        if (S.emit > 0) {
+          const x0 = CX + R - 40, y0 = CY;
+          const x1 = 1090, y1 = 470;
+          const mx = x0 + (x1 - x0) * S.emit, my = y0 + (y1 - y0) * S.emit;
+          ctx.strokeStyle = ACCENT; ctx.globalAlpha = 0.5 * S.emit; ctx.lineWidth = 1.4;
+          ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(mx, my); ctx.stroke();
+          ctx.fillStyle = ACCENT2; ctx.globalAlpha = 0.8 * S.emit;
+          ctx.beginPath(); ctx.arc(mx, my, 4, 0, Math.PI * 2); ctx.fill();
+        }
+
+        // iris — the one glow
+        const irisR = R - 84;
+        const g = ctx.createRadialGradient(CX, CY, 2, CX, CY, irisR + 20);
+        g.addColorStop(0, ACCENT); g.addColorStop(0.55, ACCENT); g.addColorStop(1, "transparent");
+        ctx.globalAlpha = a0 * (0.24 + 0.32 * breath);
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(CX, CY, irisR + 20, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = a0 * 0.9; ctx.strokeStyle = ACCENT; ctx.lineWidth = 2.4;
+        ctx.beginPath(); ctx.arc(CX, CY, irisR, 0, Math.PI * 2); ctx.stroke();
+        ctx.globalAlpha = a0 * (0.5 + 0.5 * breath); ctx.fillStyle = ACCENT;
+        ctx.beginPath(); ctx.arc(CX, CY, 5, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+
+      // ---- the seek-safe timeline ----
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true, onUpdate: drawCore });
+
+      // A time proxy so the canvas advances with the timeline even while seeking.
+      tl.to(S, { t: 12000, duration: 12, ease: "none" }, 0);
+
+      // Beat 1 — core wakes (0–2.6s)
+      tl.to(S, { intro: 1, duration: 2.4, ease: "power2.out" }, 0.2);
+
+      // Beat 2 — a skill is emitted (2.8–4.2s)
+      tl.to(S, { emit: 1, duration: 1.1, ease: "power2.inOut" }, 2.8);
+      tl.fromTo("#card", { opacity: 0, x: -260, scale: 0.6, filter: "blur(6px)" },
+        { opacity: 1, x: 0, scale: 1, filter: "blur(0px)", duration: 1.1, ease: "power3.out" }, 3.0);
+      tl.fromTo("#card .title", { scaleX: 0, transformOrigin: "left" },
+        { scaleX: 1, duration: 0.5, ease: "power2.out" }, 3.6);
+      tl.to("#card .row", { opacity: 0.5, duration: 0.5, stagger: 0.12 }, 3.9);
+
+      // Beat 3 — self-test scanline sweep (4.4–6.4s)
+      tl.set("#scan", { opacity: 1 }, 4.4);
+      tl.fromTo("#scan", { y: -120 }, { y: 336, duration: 1.8, ease: "power1.inOut" }, 4.4);
+      tl.to("#scan", { opacity: 0, duration: 0.3 }, 6.2);
+
+      // Beat 4 — verdict resolves (6.6–8.2s)
+      tl.to("#card", { borderColor: "rgba(86,223,180,0.6)", duration: 0.6 }, 6.6);
+      tl.to("#verdict", { opacity: 1, duration: 0.4 }, 6.7);
+      tl.fromTo("#check", { scale: 0.4 }, { scale: 1, duration: 0.7, ease: "back.out(2.2)" }, 6.8);
+
+      // Beat 5 — brand + settle (8.4–12s)
+      tl.to("#brand", { opacity: 1, duration: 0.9, ease: "power2.out" }, 8.4);
+      tl.to("#card", { y: -10, duration: 3.2, ease: "sine.inOut" }, 8.8); // gentle float/settle
+
+      tl.seek(0);
+      drawCore();
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>
