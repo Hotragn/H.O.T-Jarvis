@@ -38,7 +38,6 @@
         const breath = 0.5 + 0.5 * Math.sin(u * TAU);
         // slow radar sweep inside the gauge — clear, continuous periodic motion
         const sweepA = u * TAU;
-        const wedge = ctx.createConicGradient ? null : null;
         ctx.save();
         ctx.beginPath(); ctx.arc(CX, CY, R - 8, 0, TAU); ctx.clip();
         for (let w = 0; w < 18; w++) {
