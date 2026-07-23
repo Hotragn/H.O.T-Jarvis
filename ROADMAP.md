@@ -46,10 +46,21 @@ Machine-readable task queue. Status: `ready` | `in-progress` | `done` | `blocked
 - [ ] `blocked (needs CI + guardrails proven)` Auto mode: scheduler loop over this roadmap with resource caps, kill switch, dry-run gates
 - [ ] `ready` Research-to-feature loop: scan agent papers, propose issues
 
+## M4 — Mobile (iOS)
+
+Groundwork planned in [docs/ios/README.md](docs/ios/README.md). Build/submit needs macOS + Xcode + a paid Apple Developer account.
+
+- [x] `done` iOS architecture + App Store readiness plan (Tauri v2 iOS target, inference fork, Review-guideline analysis incl. 2.5.2, privacy manifest, asset specs, Mac build/submit checklist)
+- [ ] `blocked (owner decision)` Choose the iOS inference model: companion-to-desktop (recommended) / on-device / cloud tiers
+- [ ] `blocked (needs Mac)` `tauri ios init` + signing + Simulator run
+- [ ] `blocked (needs $99 enrollment)` App Store Connect record, TestFlight, submission
+- [ ] `ready` iOS UI pass: safe-area insets, touch targets, hide desktop-only telemetry; native AVSpeech/SFSpeech voice plugin
+
 ## Distribution / front door
 
 - [x] `done` Premium landing page (standalone static site, `landing/`): live-canvas hero, four feature showcases, narrative design, performance-correct lazy video plumbing, designed posters in every slot. ~28 KB video-free baseline.
-- [ ] `blocked (needs Higgsfield credits — owner's call)` Generate the cinematic assets per `landing/assets/ASSETS.md`: Veo ambient loops, the Seedance flagship, WAN-restyled undo capture.
+- [x] `done` Flagship cinematic ("a skill is born") rendered free via HyperFrames (HTML→MP4), 1080p/12s, wired into the hero slot.
+- [ ] `ready` Render the remaining loops (hero ambient, memory, confidence, undo) the same way — HyperFrames per `landing/assets/ASSETS.md`.
 - [ ] `ready` Deploy the landing page (GitHub Pages from `landing/`).
 - [ ] `ready` README GIF / hero — the 10-second screen recording (needs owner or screen capture).
 

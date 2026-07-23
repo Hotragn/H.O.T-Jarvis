@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Apple Privacy Manifest for H.O.T-Jarvis on iOS.
+  Drop this into the Xcode project (src-tauri/gen/apple/) after `tauri ios init`,
+  and add it to the app target's "Copy Bundle Resources".
+
+  Reflects the LOCAL-FIRST posture: no tracking, no data collected off-device.
+  If you ship the cloud-inference option (fork #3), you must ALSO declare the
+  data sent to the model provider in App Store Connect's App Privacy section
+  (prompt text → "Other Data", used for App Functionality) and reconsider
+  NSPrivacyCollectedDataTypes below.
+
+  The required-reason API entries cover what rusqlite / std file I/O and
+  UserDefaults typically touch. Verify against Apple's current
+  "Required reason API" list before submission and trim any you don't use.
+-->
+<plist version="1.0">
+<dict>
+  <key>NSPrivacyTracking</key>
+  <false/>
+
+  <key>NSPrivacyTrackingDomains</key>
+  <array/>
+
+  <key>NSPrivacyCollectedDataTypes</key>
+  <array/>
+
+  <key>NSPrivacyAccessedAPITypes</key>
+  <array>
+    <dict>
+      <key>NSPrivacyAccessedAPIType</key>
+      <string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+      <key>NSPrivacyAccessedAPITypeReasons</key>
+      <array>
+        <string>C617.1</string>
+      </array>
+    </dict>
+    <dict>
+      <key>NSPrivacyAccessedAPIType</key>
+      <string>NSPrivacyAccessedAPICategoryDiskSpace</string>
+      <key>NSPrivacyAccessedAPITypeReasons</key>
+      <array>
+        <string>E174.1</string>
+      </array>
+    </dict>
+    <dict>
+      <key>NSPrivacyAccessedAPIType</key>
+      <string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+      <key>NSPrivacyAccessedAPITypeReasons</key>
+      <array>
+        <string>CA92.1</string>
+      </array>
+    </dict>
+  </array>
+</dict>
+</plist>
