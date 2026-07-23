@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: #04070d; }
+      canvas { position: absolute; inset: 0; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="8" data-width="1920" data-height="1080">
+      <div id="stage" class="clip" data-start="0" data-duration="8" data-track-index="0">
+        <canvas id="c" width="1920" height="1080"></canvas>
+      </div>
+    </div>
+    <script>
+      // Reasoning-memory: nodes of light drawing faint constellations that form
+      // and dissolve on an 8s cycle — periodic, so it loops seamlessly.
+      const D = 8000, TAU = Math.PI * 2;
+      const ctx = document.getElementById("c").getContext("2d");
+      const S = { t: 0 };
+      // deterministic nodes (centered cluster)
+      const N = [];
+      for (let i = 0; i < 14; i++) {
+        const a = (i / 14) * TAU + (i % 3) * 0.4;
+        const rad = 180 + (i % 4) * 110;
+        N.push({ x: 960 + Math.cos(a) * rad, y: 540 + Math.sin(a) * rad * 0.62, k: 1 + (i % 3), ph: i * 0.5 });
+      }
+      // edges connect some node pairs; each fades in/out on its own periodic phase
+      const E = [];
+      for (let i = 0; i < N.length; i++) {
+        const j = (i * 5 + 3) % N.length;
+        if (i !== j) E.push({ a: i, b: j, ph: (i * 0.8) % TAU, k: 1 + (i % 2) });
+      }
+      function draw() {
+        const t = S.t, u = t / D;
+        ctx.clearRect(0, 0, 1920, 1080);
+        const g = ctx.createRadialGradient(960, 540, 40, 960, 540, 900);
+        g.addColorStop(0, "rgba(10,30,44,0.5)"); g.addColorStop(1, "rgba(4,7,13,0)");
+        ctx.fillStyle = g; ctx.fillRect(0, 0, 1920, 1080);
+        // edges
+        for (const e of E) {
+          const al = 0.3 * (0.5 + 0.5 * Math.sin(u * TAU * e.k + e.ph));
+          ctx.strokeStyle = "#38c6f4"; ctx.globalAlpha = al; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(N[e.a].x, N[e.a].y); ctx.lineTo(N[e.b].x, N[e.b].y); ctx.stroke();
+        }
+        // nodes
+        for (const n of N) {
+          const pulse = 0.55 + 0.45 * Math.sin(u * TAU * n.k + n.ph);
+          ctx.globalAlpha = 0.5 + 0.5 * pulse;
+          ctx.fillStyle = n.k === 2 ? "#56dfb4" : "#38c6f4";
+          ctx.beginPath(); ctx.arc(n.x, n.y, 3 + pulse * 3, 0, TAU); ctx.fill();
+          ctx.globalAlpha = 0.12 * pulse;
+          ctx.beginPath(); ctx.arc(n.x, n.y, 14 + pulse * 8, 0, TAU); ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+      }
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true, onUpdate: draw });
+      tl.to(S, { t: D, duration: D / 1000, ease: "none" }, 0);
+      tl.seek(0); draw();
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

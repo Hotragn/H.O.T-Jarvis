@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: #04070d; }
+      #stage { position: absolute; inset: 0; }
+      canvas { position: absolute; inset: 0; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="8" data-width="1920" data-height="1080">
+      <div id="stage" class="clip" data-start="0" data-duration="8" data-track-index="0">
+        <canvas id="c" width="1920" height="1080"></canvas>
+      </div>
+    </div>
+    <script>
+      // Ambient hero backdrop: drifting cyan particulate + faint striations on a
+      // dark volumetric field. Every motion is a pure function of t over the
+      // 8s period, so the last frame equals the first — a seamless <video loop>.
+      const D = 8000, TAU = Math.PI * 2;
+      const ctx = document.getElementById("c").getContext("2d");
+      const S = { t: 0 };
+      // deterministic particle field
+      const P = [];
+      for (let i = 0; i < 70; i++) {
+        P.push({
+          x: (i * 137.5) % 1920,
+          y: (i * 89.3) % 1080,
+          r: 0.8 + (i % 5) * 0.4,
+          k: 1 + (i % 3),          // integer cycles over D → periodic
+          amp: 8 + (i % 7) * 4,
+          ph: (i * 0.7) % TAU,
+        });
+      }
+      function draw() {
+        const t = S.t, u = t / D;
+        ctx.clearRect(0, 0, 1920, 1080);
+        // static-ish radial glow
+        const g = ctx.createRadialGradient(960, 380, 40, 960, 380, 1000);
+        g.addColorStop(0, "rgba(14,42,58,0.55)");
+        g.addColorStop(1, "rgba(4,7,13,0)");
+        ctx.fillStyle = g; ctx.fillRect(0, 0, 1920, 1080);
+        // striations drifting periodically
+        ctx.strokeStyle = "#38c6f4";
+        for (let s = 0; s < 3; s++) {
+          const y = 300 + s * 200 + Math.sin(u * TAU + s) * 10;
+          ctx.globalAlpha = 0.05;
+          ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(1920, y + Math.sin(u * TAU) * 12); ctx.stroke();
+        }
+        // particulate
+        for (const p of P) {
+          const dx = Math.sin(u * TAU * p.k + p.ph) * p.amp;
+          const dy = Math.cos(u * TAU * p.k + p.ph) * p.amp * 0.6;
+          const tw = 0.35 + 0.35 * (0.5 + 0.5 * Math.sin(u * TAU * p.k + p.ph * 1.7));
+          ctx.globalAlpha = tw;
+          ctx.fillStyle = p.k === 2 ? "#56dfb4" : "#38c6f4";
+          ctx.beginPath(); ctx.arc(p.x + dx, p.y + dy, p.r, 0, TAU); ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+      }
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true, onUpdate: draw });
+      tl.to(S, { t: D, duration: D / 1000, ease: "none" }, 0);
+      tl.seek(0); draw();
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

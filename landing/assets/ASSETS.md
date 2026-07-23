@@ -13,13 +13,16 @@ plumbing. To light one up: render, save `<slot>.mp4` to `assets/video/`, set
 
 ## Status
 
+All five slots are now rendered and wired (each a seamless 8s loop except the
+12s flagship). Total video weight ~2.5 MB, lazy-loaded per slot.
+
 | Slot | Feeling | Source | Status |
 |------|---------|--------|--------|
-| 2 flagship — a skill is born | aliveness + trust | `../motion/skill-born/` | ✅ **rendered** — 1080p, 12s, 1.16 MB, wired in |
-| 1 hero ambient | calm power | `../motion/hero-ambient/` (todo) | poster only |
-| 3 memory | depth | `../motion/memory/` (todo) | poster only |
-| 4 confidence | trust | `../motion/confidence/` (todo) | poster only |
-| 5 undo | precision | screen capture + overlay | poster only |
+| 2 flagship — a skill is born | aliveness + trust | `../motion/skill-born/` | ✅ 1080p, 12s, 1.16 MB |
+| 1 hero ambient | calm power | `../motion/hero-ambient/` | ✅ 1080p, 8s loop, 531 KB |
+| 3 memory | depth | `../motion/memory/` | ✅ 1080p, 8s loop, 284 KB |
+| 4 confidence | trust | `../motion/confidence/` | ✅ 1080p, 8s loop, 422 KB |
+| 5 undo | precision | `../motion/undo/` | ✅ 1080p, 8s loop, 133 KB (authored, not a capture) |
 
 ## Render workflow (per slot)
 1. `npx hyperframes init landing/motion/<slot> --non-interactive --example=blank`
@@ -36,53 +39,37 @@ Keep each clip within its budget (hero/flagship ≤ ~2 MB, loops ≤ ~1 MB).
 
 ---
 
-## Slot 1 — Hero ambient backdrop  → `assets/video/hero-ambient.{webm,mp4}`
-- **Feeling:** calm power. Sits *behind* the live canvas core at low opacity.
-- **Model:** Veo 3.1 (`veo3`, atmospheric). 21:9, ~8s, seamless, muted.
-- **Prompt:** "A vast, near-black volumetric space. Faint teal-cyan particulate
-  drifts slowly like deep-ocean bioluminescence. Subtle horizontal light
-  striations, extremely slow parallax, no subject, no text. Calm, premium,
-  cinematic, high dynamic range darkness."
+## Per-slot compositions
 
-## Slot 2 — Flagship: a skill is born  → `assets/video/skill-born.{webm,mp4}`
-- **Feeling:** aliveness + earned trust. The one flagship sequence.
-- **Keyframes first** (image model, 16:9):
-  - start: "A glowing cyan arc-reactor core alone in dark space, concentric
-    instrument rings, single point of light at center. Restrained, cinematic."
-  - end: "The same core, now with a crisp holographic card locked in beside it
-    stamped with a green check, faint connective light traces between them.
-    Sense of something proven and complete."
-- **Model:** Seedance 2.0 (`seedance_2_0`), 16:9, 12–15s, `mode: std`,
-  `resolution: 1080p`, `genre: epic`, start_image + end_image = the keyframes.
-- **Motion:** core pulses, emits a card, the card self-tests (scanline), a
-  check resolves, everything settles. No literal UI text.
+All five are authored HyperFrames compositions (canvas 2D + a paused, seek-safe
+GSAP timeline) rendered to MP4 — no external model, no capture. Sources live at
+`../motion/<slot>/index.html`.
 
-## Slot 3 — Reasoning-memory ambient  → `assets/video/memory.{webm,mp4}`
-- **Feeling:** depth. "It learns from its own past."
-- **Model:** Veo 3.1, 16:9, ~6s loop, muted.
-- **Prompt:** "Scattered points of soft light in dark space slowly drawing
-  faint lines between themselves, forming and dissolving constellations.
-  Contemplative, deep, teal-cyan on near-black."
+### Slot 1 — Hero ambient backdrop → `video/hero-ambient.mp4`
+Feeling: calm power. Sits behind the live canvas core at low opacity. Drifting
+cyan/mint particulate on periodic orbits + faint shifting striations over a dark
+volumetric field. 1080p, 8s seamless loop.
 
-## Slot 4 — Confidence gauge motion  → `assets/video/confidence.{webm,mp4}`
-- **Feeling:** trust. "It tells you when it's unsure."
-- **Model:** Veo 3.1, 16:9, ~5s loop, muted.
-- **Prompt:** "A single thin arc of light sweeping to fill a circular gauge,
-  hesitating near the end, settling amber then resolving to teal. Precise,
-  instrument-like, dark background."
+### Slot 2 — Flagship: a skill is born → `video/skill-born.mp4`
+Feeling: aliveness + earned trust. The arc-reactor core wakes, emits a
+holographic skill card, a scanline self-tests it, a green "TEST PASSED" resolves,
+then everything settles. 1080p, 12s.
 
-## Slot 5 — Replay & undo (restyled real UI)  → `assets/video/undo.{webm,mp4}`
-- **Feeling:** precision, safety. Authentic-but-stylized.
-- **Source:** a real screen recording of the app's EVENTS timeline undoing an
-  action (capture with the app running).
-- **Model:** WAN 2.6 (restyle the capture into the holographic aesthetic —
-  do not generate from nothing). Keep it clearly stylized.
+### Slot 3 — Reasoning-memory → `video/memory.mp4`
+Feeling: depth. Nodes of light draw faint constellations that form and dissolve
+on a periodic cycle. 1080p, 8s seamless loop.
 
----
+### Slot 4 — Confidence gauge → `video/confidence.mp4`
+Feeling: trust. A filled 270° gauge ("78") with a slow radar sweep and a
+breathing glow. 1080p, 8s seamless loop.
 
-### Generation is credit-gated
-When ready, top up credits (your call), then for each slot call
-`mcp__higgsfield__generate_image` for keyframes and
-`mcp__higgsfield__generate_video` with the model + params above, poll
-`job_status`, download, encode, and place. Draft on MiniMax first to judge
-composition cheaply; finish the keepers on the model listed.
+### Slot 5 — Replay & undo → `video/undo.mp4`
+Feeling: precision, safety. A timeline spine with a travelling light pulse and a
+rotating revert arc on the amber "undo" step. Authored (not a screen capture).
+1080p, 8s seamless loop.
+
+## Seamless-loop rule
+Every loop's motion is a pure periodic function of timeline time over the clip
+duration, so frame(0) == frame(D) and `<video loop>` repeats without a visible
+cut. Verify with `hyperframes check` (its anti-static test also confirms the
+timeline actually advances under seek).

@@ -1,0 +1,7 @@
+# HyperFrames build artifacts — the composition source (index.html, gsap.min.js)
+# is committed for reproducibility; renders and caches are not.
+renders/
+node_modules/
+.hyperframes/
+capture/
+*.log
