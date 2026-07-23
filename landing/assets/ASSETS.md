@@ -13,13 +13,16 @@ plumbing. To light one up: render, save `<slot>.mp4` to `assets/video/`, set
 
 ## Status
 
+All five slots are now rendered and wired (each a seamless 8s loop except the
+12s flagship). Total video weight ~2.5 MB, lazy-loaded per slot.
+
 | Slot | Feeling | Source | Status |
 |------|---------|--------|--------|
-| 2 flagship — a skill is born | aliveness + trust | `../motion/skill-born/` | ✅ **rendered** — 1080p, 12s, 1.16 MB, wired in |
-| 1 hero ambient | calm power | `../motion/hero-ambient/` (todo) | poster only |
-| 3 memory | depth | `../motion/memory/` (todo) | poster only |
-| 4 confidence | trust | `../motion/confidence/` (todo) | poster only |
-| 5 undo | precision | screen capture + overlay | poster only |
+| 2 flagship — a skill is born | aliveness + trust | `../motion/skill-born/` | ✅ 1080p, 12s, 1.16 MB |
+| 1 hero ambient | calm power | `../motion/hero-ambient/` | ✅ 1080p, 8s loop, 531 KB |
+| 3 memory | depth | `../motion/memory/` | ✅ 1080p, 8s loop, 284 KB |
+| 4 confidence | trust | `../motion/confidence/` | ✅ 1080p, 8s loop, 422 KB |
+| 5 undo | precision | `../motion/undo/` | ✅ 1080p, 8s loop, 133 KB (authored, not a capture) |
 
 ## Render workflow (per slot)
 1. `npx hyperframes init landing/motion/<slot> --non-interactive --example=blank`

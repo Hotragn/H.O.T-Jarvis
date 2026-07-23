@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: #04070d; }
+      canvas { position: absolute; inset: 0; }
+      #rows { position: absolute; left: 640px; top: 250px; font-family: monospace; }
+      .row { position: absolute; left: 60px; font-size: 30px; letter-spacing: 1px; color: #93a4b8; white-space: nowrap; }
+      .row .k { color: #38c6f4; }
+      .row.amber { color: #f0b23e; }
+      .row.dim { color: #5f7183; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="8" data-width="1920" data-height="1080">
+      <div id="stage" class="clip" data-start="0" data-duration="8" data-track-index="0">
+        <canvas id="c" width="1920" height="1080"></canvas>
+        <div id="rows">
+          <div class="row" style="top:0px"><span class="k">chat.user</span> · "build me a skill"</div>
+          <div class="row" style="top:110px"><span class="k">skill.authored</span> · test passed</div>
+          <div class="row" style="top:220px">note.saved · "roadmap"</div>
+          <div class="row amber" style="top:330px">undo · reverting last action…</div>
+          <div class="row dim" style="top:440px">chat.assistant · confidence 92%</div>
+        </div>
+      </div>
+    </div>
+    <script>
+      // Replay & undo: a timeline spine with a light pulse travelling down it,
+      // and the "undo" step glowing with a rotating revert arrow — once per 8s,
+      // periodic and seamless.
+      const D = 8000, TAU = Math.PI * 2;
+      const ctx = document.getElementById("c").getContext("2d");
+      const SPINE_X = 690, TOP = 262, GAP = 110, ROWS = 5;
+      const S = { t: 0 };
+      function draw() {
+        const t = S.t, u = t / D;
+        ctx.clearRect(0, 0, 1920, 1080);
+        // spine
+        ctx.strokeStyle = "#16232f"; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(SPINE_X, TOP - 20); ctx.lineTo(SPINE_X, TOP + (ROWS - 1) * GAP + 20); ctx.stroke();
+        // node dots
+        for (let i = 0; i < ROWS; i++) {
+          const y = TOP + i * GAP;
+          const amber = i === 3;
+          ctx.fillStyle = amber ? "#f0b23e" : (i === 2 ? "#56dfb4" : "#38c6f4");
+          ctx.globalAlpha = i === 4 ? 0.4 : 1;
+          ctx.beginPath(); ctx.arc(SPINE_X, y, amber ? 9 : 7, 0, TAU); ctx.fill();
+          if (amber) {
+            // rotating revert arc around the undo node
+            ctx.globalAlpha = 0.9; ctx.strokeStyle = "#f0b23e"; ctx.lineWidth = 2.5;
+            const a0 = u * TAU;
+            ctx.beginPath(); ctx.arc(SPINE_X, y, 16, a0, a0 + Math.PI * 1.5); ctx.stroke();
+            const ax = SPINE_X + Math.cos(a0 + Math.PI * 1.5) * 16, ay = y + Math.sin(a0 + Math.PI * 1.5) * 16;
+            ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ax - 6, ay - 5); ctx.moveTo(ax, ay); ctx.lineTo(ax - 7, ay + 4); ctx.stroke();
+          }
+        }
+        // travelling pulse down the spine
+        const py = TOP + ((u * (ROWS - 1)) % (ROWS - 1)) * GAP;
+        ctx.globalAlpha = 0.9; ctx.fillStyle = "#7fe7ff";
+        ctx.beginPath(); ctx.arc(SPINE_X, py, 5, 0, TAU); ctx.fill();
+        ctx.globalAlpha = 0.2; ctx.beginPath(); ctx.arc(SPINE_X, py, 16, 0, TAU); ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true, onUpdate: draw });
+      tl.to(S, { t: D, duration: D / 1000, ease: "none" }, 0);
+      // the undo row breathes (opacity) periodically — transform/opacity only
+      tl.to("#rows .amber", { opacity: 0.55, duration: 4, yoyo: true, repeat: 1, ease: "sine.inOut" }, 0);
+      tl.seek(0); draw();
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

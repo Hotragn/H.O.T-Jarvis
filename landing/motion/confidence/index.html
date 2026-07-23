@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="gsap.min.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: #04070d; }
+      canvas { position: absolute; inset: 0; }
+      #num { position: absolute; inset: 0; display: grid; place-items: center; }
+      #num .v { font-family: "Roboto", system-ui, sans-serif; font-size: 150px; font-weight: 300;
+        color: #d9e7f2; letter-spacing: 4px; }
+      #num .l { position: absolute; top: calc(50% + 96px); left: 0; right: 0; text-align: center;
+        font-family: monospace; font-size: 22px; letter-spacing: 12px; color: #93a4b8; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="8" data-width="1920" data-height="1080">
+      <div id="stage" class="clip" data-start="0" data-duration="8" data-track-index="0">
+        <canvas id="c" width="1920" height="1080"></canvas>
+        <div id="num"><div class="v">78</div><div class="l">CONFIDENCE</div></div>
+      </div>
+    </div>
+    <script>
+      // Calibrated autonomy: a filled 270° gauge with a light highlight that
+      // sweeps around the arc once per 8s cycle, and a gentle breathing glow.
+      // Fully periodic → seamless loop. The 78 sits at "trust" (teal) range.
+      const D = 8000, TAU = Math.PI * 2;
+      const ctx = document.getElementById("c").getContext("2d");
+      const CX = 960, CY = 540, R = 300;
+      const START = Math.PI * 0.75, SWEEP = Math.PI * 1.5; // 270° gauge
+      const FILL = 0.78;
+      const S = { t: 0 };
+      function draw() {
+        const t = S.t, u = t / D;
+        ctx.clearRect(0, 0, 1920, 1080);
+        const breath = 0.5 + 0.5 * Math.sin(u * TAU);
+        // slow radar sweep inside the gauge — clear, continuous periodic motion
+        const sweepA = u * TAU;
+        const wedge = ctx.createConicGradient ? null : null;
+        ctx.save();
+        ctx.beginPath(); ctx.arc(CX, CY, R - 8, 0, TAU); ctx.clip();
+        for (let w = 0; w < 18; w++) {
+          const a = sweepA - w * 0.05;
+          ctx.strokeStyle = "#38c6f4"; ctx.globalAlpha = 0.14 * (1 - w / 18);
+          ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(CX, CY); ctx.lineTo(CX + Math.cos(a) * (R - 8), CY + Math.sin(a) * (R - 8)); ctx.stroke();
+        }
+        ctx.restore();
+        ctx.globalAlpha = 1;
+        // track
+        ctx.strokeStyle = "#16232f"; ctx.lineWidth = 14; ctx.lineCap = "round";
+        ctx.beginPath(); ctx.arc(CX, CY, R, START, START + SWEEP); ctx.stroke();
+        // filled portion
+        ctx.strokeStyle = "#38c6f4"; ctx.globalAlpha = 0.85; ctx.lineWidth = 14;
+        ctx.beginPath(); ctx.arc(CX, CY, R, START, START + SWEEP * FILL); ctx.stroke();
+        // glow on the fill
+        ctx.globalAlpha = 0.18 + 0.16 * breath; ctx.lineWidth = 26;
+        ctx.beginPath(); ctx.arc(CX, CY, R, START, START + SWEEP * FILL); ctx.stroke();
+        // sweeping highlight travelling along the filled arc
+        const hp = START + SWEEP * FILL * ((u) % 1);
+        const hx = CX + Math.cos(hp) * R, hy = CY + Math.sin(hp) * R;
+        ctx.globalAlpha = 0.9; ctx.fillStyle = "#7fe7ff";
+        ctx.beginPath(); ctx.arc(hx, hy, 8, 0, TAU); ctx.fill();
+        ctx.globalAlpha = 0.25; ctx.beginPath(); ctx.arc(hx, hy, 20, 0, TAU); ctx.fill();
+        // ticks around the gauge
+        ctx.globalAlpha = 0.4; ctx.strokeStyle = "#64788f"; ctx.lineWidth = 2;
+        for (let i = 0; i <= 10; i++) {
+          const a = START + (SWEEP * i) / 10;
+          ctx.beginPath();
+          ctx.moveTo(CX + Math.cos(a) * (R + 20), CY + Math.sin(a) * (R + 20));
+          ctx.lineTo(CX + Math.cos(a) * (R + 30), CY + Math.sin(a) * (R + 30));
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+      }
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true, onUpdate: draw });
+      tl.to(S, { t: D, duration: D / 1000, ease: "none" }, 0);
+      tl.seek(0); draw();
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>
