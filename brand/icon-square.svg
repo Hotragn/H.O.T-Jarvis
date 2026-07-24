@@ -1,24 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="H.O.T-Jarvis app icon">
   <title>H.O.T-Jarvis</title>
-  <!-- Full-bleed, opaque, square (no rounded corners) — the master for
-       apple-touch-icon, PWA maskable, and the iOS AppIcon. Platforms apply
-       their own masking/rounding. The mark sits inside a ~15% safe margin. -->
+  <!-- Full-bleed opaque master for raster app icons (apple-touch, PWA, iOS 1024).
+       Platforms apply their own masking/rounding. Mark sits in a ~16% safe margin. -->
   <defs>
     <linearGradient id="sq-bg" x1="0" y1="0" x2="0" y2="512" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#0a1420"/>
-      <stop offset="1" stop-color="#04070d"/>
+      <stop offset="0" stop-color="#0a1420"/><stop offset="1" stop-color="#04070d"/>
     </linearGradient>
-    <linearGradient id="sq-cyan" x1="80" y1="80" x2="432" y2="432" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#7fe7ff"/>
-      <stop offset="1" stop-color="#2aa8e0"/>
+    <linearGradient id="sq-fg" x1="120" y1="120" x2="392" y2="392" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7fe7ff"/><stop offset="1" stop-color="#2aa8e0"/>
     </linearGradient>
   </defs>
   <rect width="512" height="512" fill="url(#sq-bg)"/>
-  <g fill="none" stroke-linecap="round">
-    <path d="M432 256 A176 176 0 0 1 256 432" stroke="url(#sq-cyan)" stroke-width="44"/>
-    <path d="M168 408.4 A176 176 0 0 1 103.6 168" stroke="url(#sq-cyan)" stroke-width="44"/>
-    <path d="M168 103.6 A176 176 0 0 1 408.4 168" stroke="#56dfb4" stroke-width="44"/>
-    <path d="M408.4 168 L464 132.8" stroke="#56dfb4" stroke-width="32"/>
+  <!-- map the 100-unit mark to a 340px box centred at (256,256): scale 3.4 -->
+  <g transform="translate(256 256) scale(3.4) translate(-50 -50)">
+    <path fill="url(#sq-fg)" fill-rule="evenodd"
+          d="M50 16 A58.89 58.89 0 0 1 79.44 67 A58.89 58.89 0 0 1 20.56 67 A58.89 58.89 0 0 1 50 16 Z
+             M66 50 A16 16 0 1 0 34 50 A16 16 0 1 0 66 50 Z"/>
   </g>
-  <circle cx="256" cy="256" r="40" fill="url(#sq-cyan)"/>
 </svg>

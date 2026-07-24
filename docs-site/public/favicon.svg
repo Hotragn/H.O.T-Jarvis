@@ -1,22 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="H.O.T-Jarvis icon">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="H.O.T-Jarvis icon">
   <title>H.O.T-Jarvis</title>
   <defs>
-    <linearGradient id="hj-bg" x1="0" y1="0" x2="0" y2="64" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#0a1420"/>
-      <stop offset="1" stop-color="#04070d"/>
+    <linearGradient id="hj-bg" x1="0" y1="0" x2="0" y2="100" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0a1420"/><stop offset="1" stop-color="#04070d"/>
     </linearGradient>
-    <linearGradient id="hj-cyan2" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#7fe7ff"/>
-      <stop offset="1" stop-color="#2aa8e0"/>
+    <linearGradient id="hj-fg" x1="20" y1="20" x2="80" y2="80" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7fe7ff"/><stop offset="1" stop-color="#2aa8e0"/>
     </linearGradient>
   </defs>
-  <rect width="64" height="64" rx="15" fill="url(#hj-bg)"/>
-  <rect x="0.5" y="0.5" width="63" height="63" rx="14.5" fill="none" stroke="#2a3a4c" stroke-opacity="0.6"/>
-  <g fill="none" stroke-linecap="round">
-    <path d="M54 32 A22 22 0 0 1 32 54" stroke="url(#hj-cyan2)" stroke-width="5.5"/>
-    <path d="M21 51.05 A22 22 0 0 1 12.95 21" stroke="url(#hj-cyan2)" stroke-width="5.5"/>
-    <path d="M21 12.95 A22 22 0 0 1 51.05 21" stroke="#56dfb4" stroke-width="5.5"/>
-    <path d="M51.05 21 L58 16.6" stroke="#56dfb4" stroke-width="4"/>
+  <rect width="100" height="100" rx="24" fill="url(#hj-bg)"/>
+  <g transform="translate(50 50) scale(0.74) translate(-50 -50)">
+    <path fill="url(#hj-fg)" fill-rule="evenodd"
+          d="M50 16 A58.89 58.89 0 0 1 79.44 67 A58.89 58.89 0 0 1 20.56 67 A58.89 58.89 0 0 1 50 16 Z
+             M66 50 A16 16 0 1 0 34 50 A16 16 0 1 0 66 50 Z"/>
   </g>
-  <circle cx="32" cy="32" r="5" fill="url(#hj-cyan2)"/>
 </svg>
