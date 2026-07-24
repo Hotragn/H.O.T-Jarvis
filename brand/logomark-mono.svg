@@ -1,11 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="H.O.T-Jarvis logomark (monochrome)">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="H.O.T-Jarvis logomark (monochrome)">
   <title>H.O.T-Jarvis</title>
-  <!-- Single-colour version: inherits currentColor. Use on any background. -->
-  <g fill="none" stroke="currentColor" stroke-linecap="round">
-    <path d="M54 32 A22 22 0 0 1 32 54" stroke-width="5.5"/>
-    <path d="M21 51.05 A22 22 0 0 1 12.95 21" stroke-width="5.5"/>
-    <path d="M21 12.95 A22 22 0 0 1 51.05 21" stroke-width="5.5"/>
-    <path d="M51.05 21 L58 16.6" stroke-width="4"/>
-  </g>
-  <circle cx="32" cy="32" r="5" fill="currentColor"/>
+  <!-- Single-colour: inherits currentColor. Use on any background. -->
+  <path fill="currentColor" fill-rule="evenodd"
+        d="M50 16 A58.89 58.89 0 0 1 79.44 67 A58.89 58.89 0 0 1 20.56 67 A58.89 58.89 0 0 1 50 16 Z
+           M66 50 A16 16 0 1 0 34 50 A16 16 0 1 0 66 50 Z"/>
 </svg>

@@ -4,11 +4,26 @@ The H.O.T-Jarvis mark and how to use it.
 
 ## The mark
 
-An **aperture core**: three arc segments around a center node, left open with
-gaps — an assistant that's listening and focused, not a closed box. One segment
-is mint and throws a small **spark**: the assistant growing a new skill. It's the
-same instrument language as the app's HUD and the landing hero, distilled to a
-glyph that reads at 16px.
+**The aperture.** A Reuleaux triangle — a curved-triangle of constant width,
+where each edge is a circular arc centered on the opposite vertex — with a single
+round eye punched from the middle. One shape, one idea: an assistant that is
+always attentive. The curved triangle reads as focus and forward motion (apex
+up, stable); the open eye reads as perception.
+
+Design discipline, the way the best marks are built:
+
+- **Geometric and exact.** The silhouette is a real Reuleaux triangle
+  (circumradius 34, side 58.89 on a 100-unit grid), not a hand-drawn curve, so it
+  is reproducible and balanced. The eye is punched with `fill-rule: evenodd`, so
+  the glyph is a single path.
+- **One idea, one colour.** No gradients required, no second colour, no text in
+  the mark. It works in a single ink (`logomark-mono.svg` uses `currentColor`).
+- **Legible at 16px.** A solid silhouette with one negative-space cut holds up as
+  a favicon, where thin rings collapse. The ring thickens toward the three
+  vertices and thins along the edges, giving it an optical, lens-like quality.
+
+The cyan gradient (`#7fe7ff → #2aa8e0`) is the default finish; mint stays a
+system colour for "ready / passed" states, not part of the logo itself.
 
 ## Files
 
