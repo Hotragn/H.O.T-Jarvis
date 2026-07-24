@@ -31,7 +31,11 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      # enablement:true turns Pages on (build type = GitHub Actions) via the API
+      # on first run, so no manual Settings toggle is required.
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - name: Upload landing/ as the Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
