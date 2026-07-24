@@ -36,7 +36,8 @@ Machine-readable task queue. Status: `ready` | `in-progress` | `done` | `blocked
 - [x] `done` Notes view (create / list / read) over the notes tool
 - [x] `done` Skill library view with per-skill test status, create form, run panel
 - [ ] `ready` Reflection browser (needs reasoning-memory, M1)
-- [ ] `ready` Animated shared-element transitions between views
+- [x] `done` Animated view transitions: keyed per-tab enter animation (the core stays as the persistent shared element), reduced-motion guarded
+- [ ] `ready` Shared-element morph between views (FLIP) as a richer follow-up
 - [x] `done` Voice v0: spoken replies via OS voices (free, offline), voice toggle, barge-in, speaking/listening core states, push-to-talk where the platform provides recognition, honest fallback where it doesn't
 - [ ] `ready` Voice v1: fully local STT (Whisper on-device) so voice input works inside WebView2; then wake word + VAD + continuous conversation
 - [ ] `ready` System tray + global hotkey + launch-at-login
