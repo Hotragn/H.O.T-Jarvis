@@ -97,9 +97,10 @@ premium option. Decide and this doc's build steps stay the same.
 
 ## Assets (prepare on Windows; final export sizes on the Mac)
 
-- **App icon**: one 1024×1024 marketing icon (no alpha, no rounded corners —
-  iOS masks it). Xcode 14+ accepts the single 1024 and generates the set.
-  Source the arc-reactor mark (see `landing/favicon.svg` for the language).
+- **App icon**: ready — use `brand/app-icon-1024.png` (1024×1024, opaque, no
+  rounded corners; iOS masks it). Xcode 14+ accepts the single 1024 and
+  generates the set. Regenerate from `brand/icon-square.svg` with
+  `node scripts/generate-icons.mjs` if the mark changes.
 - **Launch screen**: a storyboard/plain color (near-black `#04070d` + the core
   mark). Keep it static; no launch animation.
 - **Screenshots** (App Store Connect): 6.7" (1290×2796) and 6.5" (1242×2688)
