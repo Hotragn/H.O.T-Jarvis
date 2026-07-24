@@ -21,6 +21,14 @@ export default defineConfig({
         replacesTitle: false,
       },
       favicon: "/favicon.svg",
+      // Cross-platform icons: PNG favicons, iOS home-screen, PWA manifest, theme.
+      head: [
+        { tag: "link", attrs: { rel: "icon", href: "/favicon-32.png", sizes: "32x32", type: "image/png" } },
+        { tag: "link", attrs: { rel: "icon", href: "/favicon-16.png", sizes: "16x16", type: "image/png" } },
+        { tag: "link", attrs: { rel: "apple-touch-icon", href: "/apple-touch-icon.png" } },
+        { tag: "link", attrs: { rel: "manifest", href: "/site.webmanifest" } },
+        { tag: "meta", attrs: { name: "theme-color", content: "#04070d" } },
+      ],
       customCss: ["./src/styles/theme.css"],
       social: [{ icon: "github", label: "GitHub", href: REPO }],
       editLink: {
