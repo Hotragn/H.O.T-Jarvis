@@ -1,0 +1,76 @@
+/* H.O.T-Jarvis docs theme — a Vercel-like dark-first surface in the product's
+   instrument palette (near-black steel, cyan accent, mint for "ready" states).
+   Built on Starlight's CSS-variable system so upgrades stay clean. */
+
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+
+:root {
+  --sl-font: "Inter Variable", "Inter", system-ui, sans-serif;
+  --sl-font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
+
+  /* Brand accent (cyan) mapped to Starlight's accent scale */
+  --sl-color-accent-low: #0b3a4d;
+  --sl-color-accent: #2aa8e0;
+  --sl-color-accent-high: #9fe4fb;
+
+  --hj-mint: #56dfb4;
+  --sl-color-text-accent: #7fe7ff;
+}
+
+/* Dark theme (default): deep steel, subtle borders, high-contrast code */
+:root[data-theme="dark"] {
+  --sl-color-bg: #04070d;
+  --sl-color-bg-nav: rgba(4, 7, 13, 0.82);
+  --sl-color-bg-sidebar: #060b15;
+  --sl-color-bg-inline-code: #0d1826;
+  --sl-color-hairline: rgba(129, 190, 232, 0.12);
+  --sl-color-hairline-light: rgba(129, 190, 232, 0.16);
+  --sl-color-gray-6: #060b15;
+  --sl-color-gray-5: #0d1826;
+  --sl-color-white: #eaf3fb;
+  --astro-code-background: #060d17;
+}
+
+/* Light theme: same accent, clean paper */
+:root[data-theme="light"] {
+  --sl-color-accent-low: #d7f0fb;
+  --sl-color-accent: #0e7fae;
+  --sl-color-accent-high: #06344a;
+  --sl-color-text-accent: #0e7fae;
+}
+
+/* Frosted, bordered top nav — the premium touch */
+.header {
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--sl-color-hairline);
+}
+
+/* Sidebar link micro-interaction */
+.sidebar a {
+  transition: color 0.15s ease, background-color 0.15s ease, transform 0.15s ease;
+}
+.sidebar a:hover {
+  transform: translateX(2px);
+}
+
+/* The logo mark a touch larger and crisp */
+.site-title img {
+  height: 1.9rem;
+}
+
+/* Code blocks: rounded, bordered, generous — Stripe/Vercel feel */
+.expressive-code,
+.sl-markdown-content pre {
+  border-radius: 12px;
+}
+.sl-markdown-content pre {
+  border: 1px solid var(--sl-color-hairline);
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .sidebar a:hover {
+    transform: none;
+  }
+}

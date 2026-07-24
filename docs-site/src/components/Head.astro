@@ -1,0 +1,51 @@
+---
+// Overrides Starlight's <Head>: renders the default, then adds JSON-LD
+// structured data and an env-gated GA4 slot (no-op until PUBLIC_GA4_ID is set).
+import Default from "@astrojs/starlight/components/Head.astro";
+
+const route = Astro.locals.starlightRoute;
+const { entry } = route;
+const isHome = entry.id === "" || entry.slug === "index";
+const title = entry.data.title;
+const description = entry.data.description ?? "";
+const canonical = Astro.url.href;
+const ga = import.meta.env.PUBLIC_GA4_ID;
+
+const jsonLd = isHome
+  ? {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      name: "H.O.T-Jarvis",
+      applicationCategory: "DeveloperApplication",
+      operatingSystem: "Windows, macOS",
+      offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+      description,
+      url: canonical,
+      license: "https://www.apache.org/licenses/LICENSE-2.0",
+    }
+  : {
+      "@context": "https://schema.org",
+      "@type": "TechArticle",
+      headline: title,
+      description,
+      url: canonical,
+      author: { "@type": "Organization", name: "H.O.T-Jarvis" },
+    };
+---
+
+<Default><slot /></Default>
+
+<link rel="canonical" href={canonical} />
+<script type="application/ld+json" is:inline set:html={JSON.stringify(jsonLd)} />
+
+{
+  ga && (
+    <>
+      <script async is:inline src={`https://www.googletagmanager.com/gtag/js?id=${ga}`} />
+      <script
+        is:inline
+        set:html={`window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','${ga}');`}
+      />
+    </>
+  )
+}

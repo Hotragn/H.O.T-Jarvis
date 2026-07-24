@@ -1,0 +1,119 @@
+---
+// Overrides Starlight's <Footer>: adds a "Was this page helpful?" widget and a
+// community CTA above the default footer (prev/next, edit link, last-updated).
+import Default from "@astrojs/starlight/components/Footer.astro";
+
+const REPO = "https://github.com/Hotragn/H.O.T-Jarvis";
+const route = Astro.locals.starlightRoute;
+const pageTitle = route.entry.data.title;
+// "No" prefills a GitHub issue scoped to this page.
+const issueUrl =
+  `${REPO}/issues/new?` +
+  new URLSearchParams({
+    title: `Docs feedback: ${pageTitle}`,
+    body: `Page: ${Astro.url.pathname}\n\nWhat was unclear or missing?`,
+    labels: "docs",
+  }).toString();
+const discussions = `${REPO}/discussions`;
+---
+
+<div class="hj-extras">
+  <div class="hj-feedback" data-issue-url={issueUrl}>
+    <span class="hj-feedback__q">Was this page helpful?</span>
+    <div class="hj-feedback__actions">
+      <button type="button" class="hj-btn" data-answer="yes">Yes</button>
+      <a class="hj-btn" href={issueUrl} data-answer="no" target="_blank" rel="noopener">No</a>
+    </div>
+    <p class="hj-feedback__thanks" hidden>Thanks — noted.</p>
+  </div>
+
+  <aside class="hj-community">
+    <strong>Building with H.O.T-Jarvis?</strong>
+    <span>Ask questions and share what you've made in the community.</span>
+    <a class="hj-btn hj-btn--accent" href={discussions} target="_blank" rel="noopener"
+      >GitHub Discussions →</a
+    >
+  </aside>
+</div>
+
+<Default />
+
+<script is:inline>
+  // Minimal, dependency-free: "Yes" shows a thanks line; "No" follows the link.
+  document.querySelectorAll(".hj-feedback").forEach((el) => {
+    const yes = el.querySelector('[data-answer="yes"]');
+    const thanks = el.querySelector(".hj-feedback__thanks");
+    const actions = el.querySelector(".hj-feedback__actions");
+    yes?.addEventListener("click", () => {
+      if (actions) actions.hidden = true;
+      if (thanks) thanks.hidden = false;
+    });
+  });
+</script>
+
+<style>
+  .hj-extras {
+    display: grid;
+    gap: 1rem;
+    margin-block: 2rem 1rem;
+  }
+  .hj-feedback {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.9rem 1.1rem;
+    border: 1px solid var(--sl-color-hairline);
+    border-radius: 12px;
+    background: var(--sl-color-bg-sidebar);
+  }
+  .hj-feedback__q {
+    font-weight: 600;
+  }
+  .hj-feedback__actions {
+    display: flex;
+    gap: 0.5rem;
+  }
+  .hj-feedback__thanks {
+    margin: 0;
+    color: var(--hj-mint);
+    font-weight: 600;
+  }
+  .hj-btn {
+    display: inline-block;
+    padding: 0.3rem 0.9rem;
+    border-radius: 8px;
+    border: 1px solid var(--sl-color-hairline-light);
+    background: transparent;
+    color: var(--sl-color-white);
+    font: inherit;
+    font-size: var(--sl-text-sm);
+    cursor: pointer;
+    text-decoration: none;
+    transition: border-color 0.15s ease, color 0.15s ease;
+  }
+  .hj-btn:hover {
+    border-color: var(--sl-color-accent);
+    color: var(--sl-color-text-accent);
+  }
+  .hj-btn--accent {
+    border-color: var(--sl-color-accent);
+    color: var(--sl-color-text-accent);
+  }
+  .hj-community {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.9rem;
+    padding: 0.9rem 1.1rem;
+    border: 1px solid var(--sl-color-hairline);
+    border-left: 2px solid var(--sl-color-accent);
+    border-radius: 12px;
+  }
+  .hj-community span {
+    color: var(--sl-color-gray-3);
+  }
+  .hj-community .hj-btn {
+    margin-inline-start: auto;
+  }
+</style>

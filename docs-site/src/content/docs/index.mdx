@@ -1,0 +1,72 @@
+---
+title: H.O.T-Jarvis
+description: An open-source, local-first AI assistant that grows its own skills, remembers how it reasons, tells you when it's unsure, and lets you undo anything — running on your machine, for free.
+template: splash
+hero:
+  tagline: The assistant that grows its own skills, remembers how it reasons, tells you when it's unsure, and lets you undo anything — running on your machine, for free.
+  image:
+    file: ../../assets/logo.svg
+  actions:
+    - text: Get started
+      link: /tutorials/quickstart/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/Hotragn/H.O.T-Jarvis
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+## What makes it different
+
+The `jarvis` space is full of voice clones that read the weather. H.O.T-Jarvis
+has one sharp identity: an assistant you can actually trust, that gets more
+capable the more you use it — with nothing to pay and nothing leaving your
+machine.
+
+<CardGrid>
+  <Card title="Grows its own skills" icon="rocket">
+    Ask for a new ability and it writes the code **and a test**, proves the test
+    passes, and refines on failure. Skills that can't prove themselves are
+    flagged and refuse to run.
+  </Card>
+  <Card title="Remembers how it reasons" icon="open-book">
+    It re-reads its own action log and keeps short lessons about what worked and
+    what failed — then applies them to future work.
+  </Card>
+  <Card title="Tells you when it's unsure" icon="approve-check">
+    Every answer carries a confidence score. Below a threshold it asks a
+    clarifying question instead of guessing.
+  </Card>
+  <Card title="Undo anything" icon="seti:clock">
+    Every action is recorded and reversible, with a replay audit that proves the
+    log reproduces memory exactly.
+  </Card>
+</CardGrid>
+
+## Free, local, private — by design
+
+Inference runs on your machine through [Ollama](https://ollama.com) by default,
+with free cloud tiers (Groq, OpenRouter) only as a fallback. No paid API is ever
+required, and your conversations, skills, and memory stay in a local folder you
+control — exportable and wipeable at any time.
+
+```bash frame="terminal" title="three commands to a running assistant"
+ollama pull llama3.2       # 1. a free local model
+cp .env.example .env       # 2. (optional) add a free cloud key instead
+npm run tauri dev          # 3. launch the desktop app
+```
+
+<CardGrid stagger>
+  <LinkCard title="Quickstart" href="/tutorials/quickstart/" description="Install, run, and have your first conversation that survives a restart." />
+  <LinkCard title="Author your first skill" href="/tutorials/your-first-skill/" description="Ask Jarvis to build a skill and watch it self-test." />
+  <LinkCard title="Architecture" href="/explanation/architecture/" description="How the router, memory, and skill engine fit together." />
+  <LinkCard title="Tauri command reference" href="/reference/tauri-commands/" description="Every IPC command, with arguments and return shapes." />
+</CardGrid>
+
+## Built with
+
+Tauri v2 · Rust core · React + TypeScript · SQLite · Rhai · Ollama · Apache-2.0.
+No telemetry, no accounts, no lock-in.
