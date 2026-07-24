@@ -374,6 +374,8 @@ export default function App() {
       </section>
 
       <main className="view-area">
+        {/* keyed on tab so each switch replays the enter animation (§6.2) */}
+        <div className="view-swap" key={tab}>
         {tab === "chat" && (
           <>
             <div className="chat-scroll" ref={scrollRef}>
@@ -459,6 +461,7 @@ export default function App() {
             }}
           />
         )}
+        </div>
       </main>
 
       {paletteOpen && (

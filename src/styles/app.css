@@ -300,6 +300,29 @@ body {
   animation: boot var(--dur-slow) var(--ease-out) 240ms both;
 }
 
+/* Per-tab swap: keyed remount replays this enter, so navigation feels
+   continuous rather than a hard cut (§6.2). Fills height so the chat
+   flex layout (scroll + composer) is preserved. */
+.view-swap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  flex: 1;
+  min-height: 0;
+  animation: view-enter var(--dur-med) var(--ease-out) both;
+}
+
+@keyframes view-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.994);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 /* --- conversation --- */
 .chat-scroll {
   flex: 1;
@@ -933,5 +956,9 @@ body {
   .thinking i {
     animation: none;
     opacity: 0.8;
+  }
+  .view-swap,
+  .view-area {
+    animation: none;
   }
 }
