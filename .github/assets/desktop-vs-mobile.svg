@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 600" width="1280" height="600" role="img" aria-label="Comparison of H.O.T-Jarvis on desktop today versus mobile iOS as planned">
+  <title>Desktop vs Mobile Jarvis</title>
+  <defs>
+    <linearGradient id="bg2" x1="0" y1="0" x2="1280" y2="600" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#060d17"/><stop offset="1" stop-color="#04070d"/>
+    </linearGradient>
+    <radialGradient id="mini" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#7fe7ff"/><stop offset="60%" stop-color="#38c6f4"/><stop offset="100%" stop-color="#38c6f4" stop-opacity="0"/>
+    </radialGradient>
+    <style>
+      @keyframes pulse { 0%,100% { opacity:.5 } 50% { opacity:1 } }
+      @keyframes flow  { to { stroke-dashoffset: -80; } }
+      @keyframes travel { 0% { offset-distance: 0% } 100% { offset-distance: 100% } }
+      @keyframes rise  { 0% { opacity:0; transform: translateY(8px) } 100% { opacity:1; transform:none } }
+      .core  { animation: pulse 3.4s ease-in-out infinite; }
+      .sync  { stroke-dasharray: 8 10; animation: flow 2s linear infinite; }
+      .dot   { offset-path: path('M 640 190 L 852 190'); animation: travel 2.6s ease-in-out infinite; }
+      .row   { opacity:0; animation: rise .7s cubic-bezier(.16,1,.3,1) forwards; }
+      .r1{animation-delay:.15s}.r2{animation-delay:.30s}.r3{animation-delay:.45s}
+      .r4{animation-delay:.60s}.r5{animation-delay:.75s}.r6{animation-delay:.90s}
+      .h  { font-family:'Segoe UI',system-ui,sans-serif; }
+      .mono { font-family:'Cascadia Code',monospace; }
+      .yes { fill:#56dfb4; } .dim { fill:#7f93a8; } .txt { fill:#d9e7f2; }
+      @media (prefers-reduced-motion: reduce) {
+        .core,.sync,.dot,.row { animation: none; } .row { opacity:1; }
+      }
+    </style>
+  </defs>
+
+  <rect width="1280" height="600" rx="20" fill="url(#bg2)"/>
+
+  <!-- column headers -->
+  <text x="470" y="46" class="h txt" font-size="20" font-weight="600" text-anchor="middle">Desktop <tspan class="dim">— today</tspan></text>
+  <text x="905" y="46" class="h txt" font-size="20" font-weight="600" text-anchor="middle">Mobile / iOS <tspan class="dim">— planned</tspan></text>
+
+  <!-- desktop window -->
+  <g>
+    <rect x="300" y="70" width="340" height="200" rx="12" fill="#081420" stroke="#38c6f4" stroke-opacity="0.35"/>
+    <rect x="300" y="70" width="340" height="30" rx="12" fill="#0d1c2b"/>
+    <circle cx="320" cy="85" r="4" fill="#f47b6a"/><circle cx="336" cy="85" r="4" fill="#f0b23e"/><circle cx="352" cy="85" r="4" fill="#56dfb4"/>
+    <circle class="core" cx="470" cy="165" r="42" fill="url(#mini)"/>
+    <circle cx="470" cy="165" r="28" fill="none" stroke="#7fe7ff" stroke-width="2"/>
+    <circle cx="470" cy="165" r="4" fill="#eaffff"/>
+    <text x="470" y="242" class="mono yes" font-size="12" text-anchor="middle" letter-spacing="1">ONLINE · llama3.2</text>
+  </g>
+
+  <!-- phone -->
+  <g>
+    <rect x="852" y="66" width="150" height="248" rx="26" fill="#081420" stroke="#38c6f4" stroke-opacity="0.35"/>
+    <rect x="905" y="78" width="44" height="8" rx="4" fill="#0d1c2b"/>
+    <circle class="core" cx="927" cy="180" r="34" fill="url(#mini)"/>
+    <circle cx="927" cy="180" r="22" fill="none" stroke="#7fe7ff" stroke-width="2"/>
+    <circle cx="927" cy="180" r="3.5" fill="#eaffff"/>
+    <text x="927" y="286" class="mono dim" font-size="11" text-anchor="middle" letter-spacing="1">companion</text>
+  </g>
+
+  <!-- companion sync line -->
+  <line class="sync" x1="640" y1="190" x2="852" y2="190" stroke="#56dfb4" stroke-width="2" opacity="0.7"/>
+  <circle class="dot" r="4" fill="#7fe7ff"/>
+  <text x="746" y="176" class="mono dim" font-size="11" text-anchor="middle">LAN · private</text>
+
+  <!-- comparison matrix -->
+  <g class="h">
+    <line x1="80" y1="330" x2="1200" y2="330" stroke="#38c6f4" stroke-opacity="0.18"/>
+    <!-- rows: dimension | desktop | mobile -->
+    <g class="row r1"><text x="80" y="360" class="dim" font-size="15">Inference</text><text x="470" y="360" class="txt" font-size="15" text-anchor="middle">Local Ollama · free</text><text x="905" y="360" class="txt" font-size="15" text-anchor="middle">Companion to desktop *</text></g>
+    <g class="row r2"><text x="80" y="398" class="dim" font-size="15">Skill engine</text><text x="470" y="398" class="yes" font-size="15" text-anchor="middle">✓ sandboxed Rhai</text><text x="905" y="398" class="yes" font-size="15" text-anchor="middle">✓ same core</text></g>
+    <g class="row r3"><text x="80" y="436" class="dim" font-size="15">Memory &amp; undo</text><text x="470" y="436" class="yes" font-size="15" text-anchor="middle">✓ local SQLite</text><text x="905" y="436" class="yes" font-size="15" text-anchor="middle">✓ local</text></g>
+    <g class="row r4"><text x="80" y="474" class="dim" font-size="15">Voice</text><text x="470" y="474" class="txt" font-size="15" text-anchor="middle">OS voices</text><text x="905" y="474" class="txt" font-size="15" text-anchor="middle">Native AVSpeech / SFSpeech</text></g>
+    <g class="row r5"><text x="80" y="512" class="dim" font-size="15">Telemetry</text><text x="470" y="512" class="txt" font-size="15" text-anchor="middle">CPU · RAM · uptime</text><text x="905" y="512" class="dim" font-size="15" text-anchor="middle">app-scoped</text></g>
+    <g class="row r6"><text x="80" y="550" class="dim" font-size="15">Distribution</text><text x="470" y="550" class="txt" font-size="15" text-anchor="middle">GitHub Releases</text><text x="905" y="550" class="txt" font-size="15" text-anchor="middle">App Store (planned)</text></g>
+    <line x1="80" y1="332" x2="80" y2="562" stroke="#38c6f4" stroke-opacity="0.0"/>
+  </g>
+  <text x="80" y="584" class="mono dim" font-size="11">* or an optional on-device model / free cloud tier — see docs/ios.</text>
+</svg>

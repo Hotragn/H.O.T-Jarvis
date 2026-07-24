@@ -1,0 +1,65 @@
+name: Deploy docs to Vercel
+
+# Deploys the docs-site/ Starlight build to Vercel on push to main.
+#
+# One-time setup — add three repository secrets (Settings → Secrets and
+# variables → Actions):
+#   VERCEL_TOKEN       a token from vercel.com/account/tokens
+#   VERCEL_ORG_ID      from `vercel link` (.vercel/project.json) or the dashboard
+#   VERCEL_PROJECT_ID  same source; the project's id
+# Until those exist, this workflow runs and cleanly skips (no failures).
+#
+# Prefer Vercel's native Git integration (docs-site/DEPLOY.md) if you'd rather
+# not manage secrets — this action is the CI alternative you asked for.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs-site/**"
+      - ".github/workflows/deploy-docs-vercel.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: vercel-docs
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - name: Check for Vercel secrets
+        id: guard
+        run: |
+          if [ -n "$VERCEL_TOKEN" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::VERCEL_TOKEN not set — skipping Vercel deploy. See docs-site/DEPLOY.md."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.guard.outputs.ok == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.guard.outputs.ok == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs-site/package-lock.json
+
+      - name: Install Vercel CLI
+        if: steps.guard.outputs.ok == 'true'
+        run: npm install -g vercel@latest
+
+      - name: Pull, build, and deploy (prebuilt, production)
+        if: steps.guard.outputs.ok == 'true'
+        working-directory: docs-site
+        run: |
+          vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+          vercel build --prod --token="$VERCEL_TOKEN"
+          vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
