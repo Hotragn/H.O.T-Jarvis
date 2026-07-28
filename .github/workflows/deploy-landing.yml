@@ -31,11 +31,13 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      # enablement:true turns Pages on (build type = GitHub Actions) via the API
-      # on first run, so no manual Settings toggle is required.
+      # Pages must be enabled once by the repo owner (see the one-time setup note
+      # above). The Actions GITHUB_TOKEN cannot create a Pages site itself — even
+      # with pages:write it returns "Resource not accessible by integration" — so
+      # enablement:true would only ever fail. We just consume the existing site.
       - uses: actions/configure-pages@v5
         with:
-          enablement: true
+          enablement: false
       - name: Upload landing/ as the Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
