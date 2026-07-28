@@ -32,6 +32,7 @@ import {
 import EventsView from "./views/EventsView";
 import MemoryView from "./views/MemoryView";
 import NotesView from "./views/NotesView";
+import ReflectionsView from "./views/ReflectionsView";
 import SkillsView from "./views/SkillsView";
 
 interface ChatItem {
@@ -41,7 +42,7 @@ interface ChatItem {
   meta?: string;
 }
 
-type Tab = "chat" | "skills" | "notes" | "memory" | "events";
+type Tab = "chat" | "skills" | "notes" | "memory" | "events" | "reflections";
 
 const TABS: { id: Tab; label: string; shortcut: string }[] = [
   { id: "chat", label: "chat", shortcut: "ctrl+1" },
@@ -49,6 +50,7 @@ const TABS: { id: Tab; label: string; shortcut: string }[] = [
   { id: "notes", label: "notes", shortcut: "ctrl+3" },
   { id: "memory", label: "memory", shortcut: "ctrl+4" },
   { id: "events", label: "events", shortcut: "ctrl+5" },
+  { id: "reflections", label: "reflections", shortcut: "ctrl+6" },
 ];
 
 const PALETTE_COMMANDS: PaletteCommand[] = [
@@ -57,6 +59,7 @@ const PALETTE_COMMANDS: PaletteCommand[] = [
   { id: "tab-notes", label: "Go to notes", hint: "ctrl+3" },
   { id: "tab-memory", label: "Go to memory", hint: "ctrl+4" },
   { id: "tab-events", label: "Go to event log", hint: "ctrl+5" },
+  { id: "tab-reflections", label: "Go to reflections", hint: "ctrl+6" },
   { id: "focus-composer", label: "Talk to Jarvis", hint: "chat" },
   { id: "theme-toggle", label: "Toggle theme" },
 ];
@@ -145,6 +148,7 @@ export default function App() {
     else if (id === "tab-notes") setTab("notes");
     else if (id === "tab-memory") setTab("memory");
     else if (id === "tab-events") setTab("events");
+    else if (id === "tab-reflections") setTab("reflections");
     else if (id === "theme-toggle") setTheme((t) => nextTheme(t));
     else if (id === "focus-composer") {
       setTab("chat");
@@ -158,7 +162,7 @@ export default function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPaletteOpen((open) => !open);
-      } else if (e.ctrlKey && ["1", "2", "3", "4", "5"].includes(e.key)) {
+      } else if (e.ctrlKey && ["1", "2", "3", "4", "5", "6"].includes(e.key)) {
         e.preventDefault();
         setTab(TABS[Number(e.key) - 1].id);
       }
@@ -451,6 +455,7 @@ export default function App() {
         {tab === "skills" && <SkillsView />}
         {tab === "notes" && <NotesView />}
         {tab === "events" && <EventsView />}
+        {tab === "reflections" && <ReflectionsView />}
         {tab === "memory" && (
           <MemoryView
             messageCount={messageCount}
