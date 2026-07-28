@@ -35,7 +35,7 @@ Machine-readable task queue. Status: `ready` | `in-progress` | `done` | `blocked
 - [x] `done` Memory browser view v0 with export-JSON and wipe controls
 - [x] `done` Notes view (create / list / read) over the notes tool
 - [x] `done` Skill library view with per-skill test status, create form, run panel
-- [ ] `ready` Reflection browser (needs reasoning-memory, M1)
+- [x] `done` Reflection browser: dedicated view over the reflection insights (ctrl+6) — filter chips by kind (skill/provider/user/general) with counts, per-kind accented cards showing the lesson, its provenance (which events it came from), and date, plus "Reflect now"
 - [x] `done` Animated view transitions: keyed per-tab enter animation (the core stays as the persistent shared element), reduced-motion guarded
 - [ ] `ready` Shared-element morph between views (FLIP) as a richer follow-up
 - [x] `done` Voice v0: spoken replies via OS voices (free, offline), voice toggle, barge-in, speaking/listening core states, push-to-talk where the platform provides recognition, honest fallback where it doesn't
