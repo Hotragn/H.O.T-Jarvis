@@ -3,6 +3,7 @@ pub mod authoring;
 pub mod calibration;
 pub mod confidence;
 pub mod eventlog;
+pub mod forgetting;
 pub mod memory;
 pub mod reflection;
 pub mod reliability;

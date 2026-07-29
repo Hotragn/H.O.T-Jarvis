@@ -11,6 +11,7 @@ use crate::core::authoring::{
 };
 use crate::core::confidence::{confidence_instruction, extract_confidence};
 use crate::core::eventlog::{Event, EventLog};
+use crate::core::forgetting;
 use crate::core::memory::{Insight, MemoryStore, StoredMessage};
 use crate::core::reflection::{
     digest_events, parse_insights, reflection_messages, with_lessons, INSIGHTS_IN_PROMPT,
@@ -43,6 +44,14 @@ struct AppState {
     /// The loaded Whisper model, kept warm between takes (loading costs seconds).
     #[cfg(feature = "local-whisper")]
     transcriber: Mutex<Option<crate::core::whisper::WhisperTranscriber>>,
+}
+
+/// Wall-clock seconds, for scoring lesson age.
+fn now_unix() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 /// Best-effort append; the log must never take the assistant down with it.
@@ -144,12 +153,25 @@ async fn chat_send(state: tauri::State<'_, AppState>, text: String) -> Result<Ch
         user_msg_id = mem
             .append_message("user", &trimmed)
             .map_err(|e| e.to_string())?;
-        let lessons: Vec<String> = mem
-            .recent_insights(INSIGHTS_IN_PROMPT)
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .map(|i| i.content)
+        // Reflection v1: pick by score, not recency. A corroborated lesson beats
+        // a fresh guess, and a stale one fades out of the prompt on its own.
+        let pool = mem.recent_insights(300).map_err(|e| e.to_string())?;
+        let candidates: Vec<forgetting::Candidate> = pool
+            .iter()
+            .map(|i| forgetting::Candidate {
+                id: i.id,
+                kind: i.kind.clone(),
+                content: i.content.clone(),
+                created_at: i.created_at,
+                corroborations: i.corroborations,
+                uses: i.uses,
+            })
             .collect();
+        let picked = forgetting::top_for_prompt(&candidates, now_unix(), INSIGHTS_IN_PROMPT);
+        let used_ids: Vec<i64> = picked.iter().map(|c| c.id).collect();
+        let lessons: Vec<String> = picked.iter().map(|c| c.content.clone()).collect();
+        // Using a lesson is itself a weak signal that it's relevant.
+        let _ = mem.mark_insights_used(&used_ids);
         context.push(ChatMessage {
             role: "system".into(),
             content: format!(
@@ -484,7 +506,20 @@ async fn run_reflection(state: &AppState) -> Result<Vec<Insight>, String> {
     {
         let mem = state.memory.lock().map_err(|e| e.to_string())?;
         let source = format!("events ..{watermark}");
+        // Reflection v1: a lesson we already hold shouldn't be stored twice. An
+        // independent re-derivation is evidence, so credit the existing copy
+        // instead — that corroboration is what keeps it alive under decay.
+        let existing = mem.recent_insights(500).map_err(|e| e.to_string())?;
         for draft in &drafts {
+            if let Some(twin) = existing.iter().find(|e| {
+                e.kind == draft.kind
+                    && forgetting::similarity(&e.content, &draft.content)
+                        >= forgetting::DUPLICATE_SIMILARITY
+            }) {
+                mem.corroborate_insight(twin.id)
+                    .map_err(|e| e.to_string())?;
+                continue;
+            }
             let id = mem
                 .add_insight(&draft.kind, &draft.content, &source)
                 .map_err(|e| e.to_string())?;
@@ -494,6 +529,8 @@ async fn run_reflection(state: &AppState) -> Result<Vec<Insight>, String> {
                 content: draft.content.clone(),
                 source: source.clone(),
                 created_at: 0,
+                corroborations: 0,
+                uses: 0,
             });
         }
         // Advance the watermark even on an empty harvest so the same events
@@ -934,6 +971,56 @@ fn stt_stop(state: tauri::State<'_, AppState>) -> Result<String, String> {
     }
 }
 
+/// Reflection v1: run a maintenance pass over the lesson store — collapse
+/// duplicates into their established twin, and forget what has faded or been
+/// squeezed out. Every drop is logged with its reason, so the timeline shows
+/// what was forgotten and why.
+#[tauri::command]
+fn maintain_insights(state: tauri::State<'_, AppState>) -> Result<forgetting::ForgetPlan, String> {
+    let now = now_unix();
+    let plan = {
+        let mem = state.memory.lock().map_err(|e| e.to_string())?;
+        let pool = mem.recent_insights(1000).map_err(|e| e.to_string())?;
+        let candidates: Vec<forgetting::Candidate> = pool
+            .iter()
+            .map(|i| forgetting::Candidate {
+                id: i.id,
+                kind: i.kind.clone(),
+                content: i.content.clone(),
+                created_at: i.created_at,
+                corroborations: i.corroborations,
+                uses: i.uses,
+            })
+            .collect();
+        let plan = forgetting::plan(&candidates, now, forgetting::CAPACITY);
+
+        // Credit the keeper before dropping its duplicate, so the evidence
+        // survives the copy that carried it.
+        for merge in &plan.merges {
+            mem.corroborate_insight(merge.keep_id)
+                .map_err(|e| e.to_string())?;
+        }
+        for id in &plan.forget {
+            mem.forget_insight(*id).map_err(|e| e.to_string())?;
+        }
+        plan
+    };
+
+    if !plan.forget.is_empty() {
+        log_event(
+            &state,
+            "memory.forgot_insights",
+            serde_json::json!({
+                "forgot": plan.forget.len(),
+                "merged": plan.merges.len(),
+                "kept": plan.kept,
+                "reasons": plan.reasons,
+            }),
+        );
+    }
+    Ok(plan)
+}
+
 fn resolve_data_dir(app: &tauri::App) -> Result<PathBuf, Box<dyn std::error::Error>> {
     match std::env::var("JARVIS_DATA_DIR") {
         Ok(dir) if !dir.trim().is_empty() => Ok(PathBuf::from(dir.trim())),
@@ -1027,6 +1114,7 @@ pub fn run() {
             wipe_memory,
             rate_message,
             calibration_report,
+            maintain_insights,
             stt_status,
             stt_device,
             stt_download_model,

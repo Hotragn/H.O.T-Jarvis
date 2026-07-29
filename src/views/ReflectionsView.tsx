@@ -4,6 +4,7 @@ import {
   calibrationReport,
   inTauri,
   listInsights,
+  maintainInsights,
   reflectNow,
   type CalibrationReport,
   type Insight,
@@ -36,6 +37,7 @@ export default function ReflectionsView() {
   const [insights, setInsights] = useState<Insight[]>([]);
   const [filter, setFilter] = useState<Filter>("all");
   const [reflecting, setReflecting] = useState(false);
+  const [tidying, setTidying] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [calib, setCalib] = useState<CalibrationReport | null>(null);
@@ -90,21 +92,58 @@ export default function ReflectionsView() {
     }
   };
 
+  // Reflection v1: selective forgetting. Collapses duplicates into the lesson
+  // they corroborate and drops what has faded, reporting exactly what went.
+  const doTidy = async () => {
+    if (tidying) return;
+    setTidying(true);
+    setNotice(null);
+    try {
+      const plan = await maintainInsights();
+      refresh();
+      if (!plan || (plan.forget.length === 0 && plan.merges.length === 0)) {
+        setNotice("Nothing to tidy — every lesson is still earning its place.");
+      } else {
+        const merged = plan.merges.length;
+        setNotice(
+          `Forgot ${plan.forget.length} lesson${plan.forget.length === 1 ? "" : "s"}` +
+            (merged > 0 ? ` (${merged} merged into the lesson they confirm)` : "") +
+            `, kept ${plan.kept}. Check the event log for the reason behind each one.`,
+        );
+      }
+    } catch (e) {
+      setNotice(String(e));
+    } finally {
+      setTidying(false);
+    }
+  };
+
   return (
     <div className="reflections-view">
       <div className="panel-title-row">
         <span className="panel-title">
           reasoning-memory · {insights.length} lesson{insights.length === 1 ? "" : "s"}
         </span>
-        <button
-          type="button"
-          className="ghost-btn"
-          disabled={reflecting || !inTauri}
-          title={inTauri ? "run a reflection pass now" : "launch the app to reflect"}
-          onClick={() => void doReflect()}
-        >
-          {reflecting ? "Reflecting…" : "Reflect now"}
-        </button>
+        <span className="editor-actions">
+          <button
+            type="button"
+            className="ghost-btn"
+            disabled={reflecting || !inTauri}
+            title={inTauri ? "run a reflection pass now" : "launch the app to reflect"}
+            onClick={() => void doReflect()}
+          >
+            {reflecting ? "Reflecting…" : "Reflect now"}
+          </button>
+          <button
+            type="button"
+            className="ghost-btn"
+            disabled={tidying || !inTauri || insights.length === 0}
+            title="merge duplicate lessons and forget the ones that have faded"
+            onClick={() => void doTidy()}
+          >
+            {tidying ? "Tidying…" : "Tidy up"}
+          </button>
+        </span>
       </div>
 
       <p className="panel-hint">
@@ -176,6 +215,13 @@ export default function ReflectionsView() {
                 <p className="reflect-text">{i.content}</p>
                 <p className="reflect-source" title={KIND_BLURB[kind]}>
                   {readSource(i.source)}
+                  {i.corroborations > 0 && (
+                    <span className="reflect-evidence" title="times a later reflection independently re-derived this lesson">
+                      {" · confirmed "}
+                      {i.corroborations}
+                      {i.corroborations === 1 ? " time" : " times"}
+                    </span>
+                  )}
                 </p>
               </li>
             );
