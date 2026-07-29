@@ -11,6 +11,7 @@ import {
   getTelemetry,
   rateMessage,
   reflectIfDue,
+  sttCancel,
   sttDownloadModel,
   sttStart,
   sttStatus,
@@ -102,9 +103,15 @@ export default function App() {
   const [ratings, setRatings] = useState<Record<number, boolean>>({});
   const [stt, setStt] = useState<SttReadiness | null>(null);
   const [transcribing, setTranscribing] = useState(false);
+  /// True only while the capture device is opening, so a double-click can't
+  /// start a second take.
+  const [starting, setStarting] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLInputElement>(null);
   const recognizerRef = useRef<{ stop: () => void } | null>(null);
+  /// True while the in-flight take is the local (Rust-captured) one, so cleanup
+  /// only cancels takes the backend actually owns.
+  const localTakeRef = useRef(false);
   const tabBarRef = useRef<HTMLElement>(null);
   const underlineRef = useRef<HTMLSpanElement>(null);
   const underlineReady = useRef(false);
@@ -117,7 +124,27 @@ export default function App() {
   // Ask the backend how it can hear, so the mic button tells the truth.
   useEffect(() => {
     sttStatus().then(setStt).catch(() => setStt(null));
+    // A take left running (window hidden to the tray, app closed, readiness
+    // changing mid-session) would otherwise keep the capture thread alive and
+    // the recorder slot occupied, so the next start fails with "already
+    // recording". Cancelling is a no-op when idle, so this is unconditional.
+    return () => {
+      sttCancel().catch(() => {});
+    };
   }, []);
+
+  // If the local route stops being available while a *local* take is running —
+  // the model is removed, or readiness resolves late — end the take rather than
+  // leaving a thread capturing behind a button that now does something else.
+  // Scoped to local takes: a web-recognizer take must not be cancelled here,
+  // since its readiness is legitimately "not_compiled".
+  useEffect(() => {
+    if (listening && localTakeRef.current && stt?.state !== "ready") {
+      localTakeRef.current = false;
+      setListening(false);
+      sttCancel().catch(() => {});
+    }
+  }, [listening, stt]);
 
   useEffect(() => {
     getStatus().then(setStatus).catch(() => setStatus(null));
@@ -242,9 +269,13 @@ export default function App() {
   // Rust core, which is the only way dictation can work inside WebView2 (it has
   // no SpeechRecognition) and the only way it stays on this machine.
   const toggleLocalListening = useCallback(async () => {
-    if (transcribing) return;
+    // Guard both directions: opening the device can take hundreds of ms, and
+    // without this a second click re-enters and the backend rejects it with
+    // "already recording", surfacing a confusing error.
+    if (transcribing || starting) return;
     if (listening) {
       setListening(false);
+      localTakeRef.current = false;
       setTranscribing(true);
       try {
         const text = await sttStop();
@@ -263,13 +294,17 @@ export default function App() {
     }
     stopSpeaking(); // barge-in
     setSpeaking(false);
+    setStarting(true);
     try {
       await sttStart();
+      localTakeRef.current = true;
       setListening(true);
     } catch (e) {
       say(String(e));
+    } finally {
+      setStarting(false);
     }
-  }, [listening, transcribing, say]);
+  }, [listening, transcribing, starting, say]);
 
   // Fetches the model once, then re-checks readiness so the button flips to
   // real push-to-talk without a restart.
@@ -395,7 +430,7 @@ export default function App() {
 
   const pill = describeStatus(status);
   const micRoute = chooseSttRoute(stt, sttAvailable);
-  const coreState: CoreState = busy || transcribing
+  const coreState: CoreState = busy || transcribing || starting
     ? "thinking"
     : listening
       ? "listening"
@@ -588,7 +623,7 @@ export default function App() {
                 type="button"
                 className="mic-btn"
                 data-active={listening}
-                data-busy={transcribing}
+                data-busy={transcribing || starting}
                 data-supported={micRoute !== "none"}
                 title={sttHint(
                   micRoute,
@@ -604,7 +639,7 @@ export default function App() {
                 }
                 onClick={toggleListening}
               >
-                {transcribing ? "…" : listening ? "◉" : micRoute === "download" ? "⇩" : "🎙"}
+                {transcribing || starting ? "…" : listening ? "◉" : micRoute === "download" ? "⇩" : "🎙"}
               </button>
               <button
                 className="send-btn"

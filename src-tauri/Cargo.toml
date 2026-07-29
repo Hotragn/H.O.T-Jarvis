@@ -35,14 +35,15 @@ thiserror = "2"
 dotenvy = "0.15"
 sysinfo = "0.33"
 rhai = "1"
-# Microphone capture. Pure Rust (WASAPI / CoreAudio / ALSA), no C++ toolchain,
-# so voice input works inside WebView2 where SpeechRecognition doesn't exist.
-cpal = "0.15"
 
-# Pure-Rust Whisper inference, enabled by the `local-whisper` feature. candle is
-# Hugging Face's Rust ML framework — no cmake/clang/C++ needed, unlike
-# whisper.cpp bindings. tokenizers drops its default features on purpose: the
-# default `onig` regex engine is a C library, and fancy-regex is pure Rust.
+# Whisper inference, enabled by the `local-whisper` feature. candle is Hugging
+# Face's Rust ML framework. It needs no cmake and no LLVM/libclang, which is the
+# reason it's here instead of whisper.cpp bindings (those require all three, and
+# `LIBCLANG_PATH` set). It is NOT C-free, though: candle-core pulls
+# tokenizers 0.22 with default features, which builds Oniguruma (`onig_sys`) from
+# C, so a C compiler is required. Our direct tokenizers dep still opts into the
+# pure-Rust regex engine; feature unification means that can't remove the
+# transitive copy, only avoid adding a second reason for it.
 candle-core = { version = "0.11", optional = true }
 candle-nn = { version = "0.11", optional = true }
 candle-transformers = { version = "0.11", optional = true }
@@ -50,13 +51,17 @@ tokenizers = { version = "0.23", optional = true, default-features = false, feat
   "fancy-regex",
 ] }
 
-# Ambient-presence stack (desktop only): live in the tray, summon with a global
-# hotkey, optionally start at login. Excluded from mobile (iOS/Android) builds.
+# Desktop-only stack, excluded from mobile (iOS/Android) builds:
+#   * tray + global hotkey + launch-at-login (ambient presence, §6.5)
+#   * cpal microphone capture (WASAPI / CoreAudio / ALSA), which otherwise drags
+#     oboe/ndk/jni into mobile builds for a feature mobile doesn't use — iOS will
+#     use a native AVAudioSession path instead (see docs/ios/README.md).
 # Note: this must be a built-in target cfg — Cargo can't see Tauri's `desktop`
 # rustc cfg here, so we spell out "not mobile" explicitly.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-autostart = "2"
+cpal = "0.15"
 
 [dev-dependencies]
 tempfile = "3"

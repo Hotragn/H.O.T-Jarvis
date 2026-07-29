@@ -18,7 +18,7 @@ use candle_transformers::models::whisper::{self as m, quantized_model::Whisper};
 use candle_transformers::quantized_var_builder::VarBuilder;
 use tokenizers::Tokenizer;
 
-use super::stt::{clean_transcript, is_probably_silence, ModelSpec};
+use super::stt::{join_windows, ModelSpec};
 
 /// Precomputed 80 x 201 mel filterbank from the candle project (MIT/Apache-2.0),
 /// little-endian f32. Whisper's front-end needs exactly these coefficients.
@@ -73,12 +73,17 @@ impl WhisperTranscriber {
         let no_timestamps =
             token(m::NO_TIMESTAMPS_TOKEN).ok_or("tokenizer is missing <|notimestamps|>")?;
         // Multilingual checkpoints need to be told the language; the .en ones
-        // must not be, or decoding goes sideways.
-        let language = if spec.english_only {
-            None
-        } else {
-            token("<|en|>")
-        };
+        // must not be, or decoding goes sideways. Fail loudly on a multilingual
+        // model with no language token rather than silently decoding without it —
+        // that silent path is exactly the "goes sideways" case.
+        let language =
+            if spec.english_only {
+                None
+            } else {
+                Some(token("<|en|>").ok_or(
+                    "this multilingual tokenizer is missing <|en|>, so language can't be set",
+                )?)
+            };
 
         // Never let the model narrate itself into the transcript.
         let mut suppress: Vec<u32> = m::NO_SPEECH_TOKENS
@@ -119,19 +124,19 @@ impl WhisperTranscriber {
         }
         let mut pieces = Vec::new();
         for window in super::audio::window_chunks(pcm, m::SAMPLE_RATE as u32) {
-            let text = self.transcribe_window(window)?;
-            if !text.is_empty() {
-                pieces.push(text);
+            // Skip windows with no speech in them at all (a long take usually
+            // ends in one), so the decoder never gets a chance to hallucinate
+            // over silence in the first place.
+            if !super::audio::has_speech(window, m::SAMPLE_RATE as u32) {
+                continue;
             }
+            pieces.push(self.transcribe_window(window)?);
         }
-        let joined = pieces.join(" ");
-        let cleaned = clean_transcript(&joined);
-        // A silence hallucination is worse than an empty result: it puts words
-        // in the user's mouth. Prefer nothing.
-        if is_probably_silence(&cleaned) {
-            return Ok(String::new());
-        }
-        Ok(cleaned)
+        // join_windows filters each window before joining, so a hallucinated
+        // filler window can't hide inside a longer string. A silence
+        // hallucination is worse than an empty result: it puts words in the
+        // user's mouth, so prefer nothing.
+        Ok(join_windows(&pieces))
     }
 
     fn transcribe_window(&mut self, pcm: &[f32]) -> Result<String, String> {

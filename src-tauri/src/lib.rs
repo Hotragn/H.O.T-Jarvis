@@ -3,6 +3,7 @@
 //! between IPC and the core types.
 
 pub mod core;
+#[cfg(desktop)]
 pub mod mic;
 
 use crate::core::authoring::{
@@ -20,7 +21,6 @@ use crate::core::router::{onboarding_message, ChatMessage, ChatReply, Router, Ro
 use crate::core::skills::{SkillEngine, SkillManifest};
 use crate::core::stt::{self, SttReadiness};
 use crate::core::tools::NotesTool;
-use crate::mic::MicRecorder;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Instant;
@@ -36,8 +36,10 @@ struct AppState {
     started: Instant,
     /// Where models and databases live; needed to find cached STT weights.
     data_dir: PathBuf,
-    /// Push-to-talk capture. One take at a time.
-    recorder: MicRecorder,
+    /// Push-to-talk capture. One take at a time. Desktop-only: cpal isn't built
+    /// for mobile targets.
+    #[cfg(desktop)]
+    recorder: crate::mic::MicRecorder,
     /// The loaded Whisper model, kept warm between takes (loading costs seconds).
     #[cfg(feature = "local-whisper")]
     transcriber: Mutex<Option<crate::core::whisper::WhisperTranscriber>>,
@@ -776,11 +778,24 @@ fn stt_status(state: tauri::State<'_, AppState>) -> SttReadiness {
     }
 }
 
-/// The microphone the take will come from, for display.
+/// The microphone the take will come from, for display. Mobile has no cpal
+/// backend compiled in, so it honestly reports nothing rather than guessing.
 #[tauri::command]
 fn stt_device() -> Option<String> {
-    crate::mic::default_input_name()
+    #[cfg(desktop)]
+    {
+        crate::mic::default_input_name()
+    }
+    #[cfg(not(desktop))]
+    {
+        None
+    }
 }
+
+/// Voice input is desktop-only for now: cpal is excluded from mobile builds, and
+/// iOS will use a native audio path instead (docs/ios/README.md).
+#[cfg(not(desktop))]
+const MOBILE_NO_CAPTURE: &str = "voice input isn't available on this platform yet";
 
 /// Fetches the model once, streaming each file to a `.partial` and renaming it
 /// into place, so an interrupted download can never masquerade as a good one.
@@ -830,69 +845,92 @@ async fn stt_download_model(state: tauri::State<'_, AppState>) -> Result<String,
 /// Begins a push-to-talk take. Returns the negotiated capture format.
 #[tauri::command]
 fn stt_start(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let (sample_rate, channels) = state.recorder.start()?;
-    Ok(serde_json::json!({ "sample_rate": sample_rate, "channels": channels }))
+    #[cfg(not(desktop))]
+    {
+        let _ = state;
+        return Err(MOBILE_NO_CAPTURE.into());
+    }
+    #[cfg(desktop)]
+    {
+        let (sample_rate, channels) = state.recorder.start()?;
+        Ok(serde_json::json!({ "sample_rate": sample_rate, "channels": channels }))
+    }
 }
 
-/// Throws away the current take without transcribing.
+/// Throws away the current take without transcribing. Safe to call when idle,
+/// which is what lets the UI clean up unconditionally on unmount.
 #[tauri::command]
 fn stt_cancel(state: tauri::State<'_, AppState>) {
+    #[cfg(desktop)]
     state.recorder.cancel();
+    #[cfg(not(desktop))]
+    let _ = state;
 }
 
 /// Ends the take and transcribes it locally. Returns the text (empty when the
 /// user said nothing usable, which is not an error).
 #[tauri::command]
 fn stt_stop(state: tauri::State<'_, AppState>) -> Result<String, String> {
-    let captured = state.recorder.stop()?;
-    let secs = captured.duration_secs();
-    let pcm = captured.for_whisper();
-
-    if pcm.is_empty()
-        || !crate::core::audio::has_speech(&pcm, crate::core::audio::WHISPER_SAMPLE_RATE)
+    #[cfg(not(desktop))]
     {
-        log_event(
-            &state,
-            "voice.heard_nothing",
-            serde_json::json!({ "seconds": secs }),
-        );
-        return Ok(String::new());
+        let _ = state;
+        return Err(MOBILE_NO_CAPTURE.into());
     }
+    #[cfg(desktop)]
+    {
+        let captured = state.recorder.stop()?;
+        let secs = captured.duration_secs();
+        let pcm = captured.for_whisper();
 
-    #[cfg(feature = "local-whisper")]
-    {
-        let spec = stt::resolve_model(None);
-        if !stt::is_downloaded(&state.data_dir, spec) {
-            return Err(format!(
-                "the {} speech model isn't downloaded yet (~{} MB)",
-                spec.id, spec.approx_mb
-            ));
+        if pcm.is_empty()
+            || !crate::core::audio::has_speech(&pcm, crate::core::audio::WHISPER_SAMPLE_RATE)
+        {
+            log_event(
+                &state,
+                "voice.heard_nothing",
+                serde_json::json!({ "seconds": secs }),
+            );
+            return Ok(String::new());
         }
-        let started = Instant::now();
-        let mut slot = state.transcriber.lock().map_err(|e| e.to_string())?;
-        if slot.is_none() {
-            let dir = stt::model_dir(&state.data_dir, spec);
-            *slot = Some(crate::core::whisper::WhisperTranscriber::load(&dir, spec)?);
+
+        #[cfg(feature = "local-whisper")]
+        {
+            let spec = stt::resolve_model(None);
+            if !stt::is_downloaded(&state.data_dir, spec) {
+                return Err(format!(
+                    "the {} speech model isn't downloaded yet (~{} MB)",
+                    spec.id, spec.approx_mb
+                ));
+            }
+            let started = Instant::now();
+            let mut slot = state.transcriber.lock().map_err(|e| e.to_string())?;
+            if slot.is_none() {
+                let dir = stt::model_dir(&state.data_dir, spec);
+                *slot = Some(crate::core::whisper::WhisperTranscriber::load(&dir, spec)?);
+            }
+            let text = slot
+                .as_mut()
+                .expect("transcriber loaded above")
+                .transcribe(&pcm)?;
+            log_event(
+                &state,
+                "voice.transcribed",
+                serde_json::json!({
+                    "seconds": secs,
+                    "chars": text.len(),
+                    "model": spec.id,
+                    "took_ms": started.elapsed().as_millis() as u64,
+                }),
+            );
+            Ok(text)
         }
-        let text = slot
-            .as_mut()
-            .expect("transcriber loaded above")
-            .transcribe(&pcm)?;
-        log_event(
-            &state,
-            "voice.transcribed",
-            serde_json::json!({
-                "seconds": secs,
-                "chars": text.len(),
-                "model": spec.id,
-                "took_ms": started.elapsed().as_millis() as u64,
-            }),
-        );
-        Ok(text)
-    }
-    #[cfg(not(feature = "local-whisper"))]
-    {
-        Err("this build has no local speech model — rebuild with `--features local-whisper`".into())
+        #[cfg(not(feature = "local-whisper"))]
+        {
+            Err(
+                "this build has no local speech model — rebuild with `--features local-whisper`"
+                    .into(),
+            )
+        }
     }
 }
 
@@ -944,7 +982,8 @@ pub fn run() {
                 system: Mutex::new(sysinfo::System::new()),
                 started: Instant::now(),
                 data_dir,
-                recorder: MicRecorder::new(),
+                #[cfg(desktop)]
+                recorder: crate::mic::MicRecorder::new(),
                 #[cfg(feature = "local-whisper")]
                 transcriber: Mutex::new(None),
             });
