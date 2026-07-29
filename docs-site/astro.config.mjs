@@ -2,6 +2,7 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 import sitemap from "@astrojs/sitemap";
+import { rehypeBaseLinks } from "./src/plugins/rehype-base-links.mjs";
 
 // The docs ship free on GitHub Pages under the /docs subpath of the project
 // site. SITE drives canonical URLs, sitemap, and OG images; BASE is the subpath
@@ -20,6 +21,11 @@ const asset = (p) => `${BASE.replace(/\/$/, "")}/${p.replace(/^\//, "")}`;
 export default defineConfig({
   site: SITE,
   base: BASE,
+  // Markdown hrefs are not base-aware on their own; this makes them so, which
+  // is what keeps internal links alive when the site is served from /docs.
+  markdown: {
+    rehypePlugins: [[rehypeBaseLinks, BASE]],
+  },
   integrations: [
     starlight({
       title: "H.O.T-Jarvis",

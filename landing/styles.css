@@ -97,9 +97,40 @@ a {
   height: 100%;
 }
 
+/* GPU core. Sits where the 2D core sits; only becomes visible once
+   webgl-core.js confirms it rendered a frame (html.has-webgl). */
+.hero-webgl {
+  position: absolute;
+  z-index: -1;
+  width: min(760px, 96vw);
+  height: min(760px, 96vw);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  transition: opacity 900ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  pointer-events: none;
+}
+
+.has-webgl .hero-webgl {
+  opacity: 1;
+}
+
+/* Only one core at a time: the 2D one is the fallback, so it steps aside. */
+.has-webgl .hero-core {
+  opacity: 0;
+}
+
+/* The GPU core is bright enough on its own; dim the video backdrop so the
+   headline keeps its contrast. */
+.has-webgl .hero-bg {
+  opacity: 0.28;
+}
+
 .hero-core {
   position: absolute;
   z-index: -1;
+  transition: opacity 700ms ease;
   width: min(560px, 82vw);
   height: min(560px, 82vw);
   top: 50%;
