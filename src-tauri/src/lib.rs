@@ -3,6 +3,7 @@
 //! between IPC and the core types.
 
 pub mod core;
+pub mod mic;
 
 use crate::core::authoring::{
     authoring_messages, parse_skill_draft, refinement_message, MAX_ATTEMPTS,
@@ -17,7 +18,9 @@ use crate::core::reflection::{
 use crate::core::replay::{audit, rebuild_messages, ReplayReport, ReplayedMessage};
 use crate::core::router::{onboarding_message, ChatMessage, ChatReply, Router, RouterConfig};
 use crate::core::skills::{SkillEngine, SkillManifest};
+use crate::core::stt::{self, SttReadiness};
 use crate::core::tools::NotesTool;
+use crate::mic::MicRecorder;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Instant;
@@ -31,6 +34,13 @@ struct AppState {
     events: Mutex<EventLog>,
     system: Mutex<sysinfo::System>,
     started: Instant,
+    /// Where models and databases live; needed to find cached STT weights.
+    data_dir: PathBuf,
+    /// Push-to-talk capture. One take at a time.
+    recorder: MicRecorder,
+    /// The loaded Whisper model, kept warm between takes (loading costs seconds).
+    #[cfg(feature = "local-whisper")]
+    transcriber: Mutex<Option<crate::core::whisper::WhisperTranscriber>>,
 }
 
 /// Best-effort append; the log must never take the assistant down with it.
@@ -739,6 +749,153 @@ fn calibration_report(
     Ok(crate::core::calibration::report(&predictions))
 }
 
+// --- Voice v1: on-device speech-to-text (§6.4) ---
+
+/// What the user's build can actually do, so the UI never offers a mic button
+/// that silently does nothing.
+#[tauri::command]
+fn stt_status(state: tauri::State<'_, AppState>) -> SttReadiness {
+    let spec = stt::resolve_model(None);
+    #[cfg(feature = "local-whisper")]
+    {
+        if stt::is_downloaded(&state.data_dir, spec) {
+            SttReadiness::Ready {
+                model: spec.id.to_string(),
+            }
+        } else {
+            SttReadiness::NeedsDownload {
+                model: spec.id.to_string(),
+                approx_mb: spec.approx_mb,
+            }
+        }
+    }
+    #[cfg(not(feature = "local-whisper"))]
+    {
+        let _ = (state, spec);
+        SttReadiness::NotCompiled
+    }
+}
+
+/// The microphone the take will come from, for display.
+#[tauri::command]
+fn stt_device() -> Option<String> {
+    crate::mic::default_input_name()
+}
+
+/// Fetches the model once, streaming each file to a `.partial` and renaming it
+/// into place, so an interrupted download can never masquerade as a good one.
+#[tauri::command]
+async fn stt_download_model(state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let spec = stt::resolve_model(None);
+    let data_dir = state.data_dir.clone();
+    if stt::is_downloaded(&data_dir, spec) {
+        return Ok(spec.id.to_string());
+    }
+    let dir = stt::model_dir(&data_dir, spec);
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+
+    let client = reqwest::Client::new();
+    for (url, dest) in stt::required_files(&data_dir, spec) {
+        if dest.exists() {
+            continue;
+        }
+        let staged = stt::staging_path(&dest);
+        let bytes = client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| format!("download failed for {url}: {e}"))?
+            .error_for_status()
+            .map_err(|e| format!("download failed for {url}: {e}"))?
+            .bytes()
+            .await
+            .map_err(|e| format!("download failed for {url}: {e}"))?;
+        if bytes.is_empty() {
+            return Err(format!("{url} returned an empty file"));
+        }
+        std::fs::write(&staged, &bytes)
+            .map_err(|e| format!("could not write {}: {e}", staged.display()))?;
+        std::fs::rename(&staged, &dest)
+            .map_err(|e| format!("could not finish {}: {e}", dest.display()))?;
+    }
+    log_event(
+        &state,
+        "voice.model_downloaded",
+        serde_json::json!({ "model": spec.id, "approx_mb": spec.approx_mb }),
+    );
+    Ok(spec.id.to_string())
+}
+
+/// Begins a push-to-talk take. Returns the negotiated capture format.
+#[tauri::command]
+fn stt_start(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let (sample_rate, channels) = state.recorder.start()?;
+    Ok(serde_json::json!({ "sample_rate": sample_rate, "channels": channels }))
+}
+
+/// Throws away the current take without transcribing.
+#[tauri::command]
+fn stt_cancel(state: tauri::State<'_, AppState>) {
+    state.recorder.cancel();
+}
+
+/// Ends the take and transcribes it locally. Returns the text (empty when the
+/// user said nothing usable, which is not an error).
+#[tauri::command]
+fn stt_stop(state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let captured = state.recorder.stop()?;
+    let secs = captured.duration_secs();
+    let pcm = captured.for_whisper();
+
+    if pcm.is_empty()
+        || !crate::core::audio::has_speech(&pcm, crate::core::audio::WHISPER_SAMPLE_RATE)
+    {
+        log_event(
+            &state,
+            "voice.heard_nothing",
+            serde_json::json!({ "seconds": secs }),
+        );
+        return Ok(String::new());
+    }
+
+    #[cfg(feature = "local-whisper")]
+    {
+        let spec = stt::resolve_model(None);
+        if !stt::is_downloaded(&state.data_dir, spec) {
+            return Err(format!(
+                "the {} speech model isn't downloaded yet (~{} MB)",
+                spec.id, spec.approx_mb
+            ));
+        }
+        let started = Instant::now();
+        let mut slot = state.transcriber.lock().map_err(|e| e.to_string())?;
+        if slot.is_none() {
+            let dir = stt::model_dir(&state.data_dir, spec);
+            *slot = Some(crate::core::whisper::WhisperTranscriber::load(&dir, spec)?);
+        }
+        let text = slot
+            .as_mut()
+            .expect("transcriber loaded above")
+            .transcribe(&pcm)?;
+        log_event(
+            &state,
+            "voice.transcribed",
+            serde_json::json!({
+                "seconds": secs,
+                "chars": text.len(),
+                "model": spec.id,
+                "took_ms": started.elapsed().as_millis() as u64,
+            }),
+        );
+        Ok(text)
+    }
+    #[cfg(not(feature = "local-whisper"))]
+    {
+        Err("this build has no local speech model — rebuild with `--features local-whisper`".into())
+    }
+}
+
 fn resolve_data_dir(app: &tauri::App) -> Result<PathBuf, Box<dyn std::error::Error>> {
     match std::env::var("JARVIS_DATA_DIR") {
         Ok(dir) if !dir.trim().is_empty() => Ok(PathBuf::from(dir.trim())),
@@ -786,6 +943,10 @@ pub fn run() {
                 events: Mutex::new(events),
                 system: Mutex::new(sysinfo::System::new()),
                 started: Instant::now(),
+                data_dir,
+                recorder: MicRecorder::new(),
+                #[cfg(feature = "local-whisper")]
+                transcriber: Mutex::new(None),
             });
             #[cfg(desktop)]
             setup_desktop_ambient(app)?;
@@ -826,7 +987,13 @@ pub fn run() {
             export_memory,
             wipe_memory,
             rate_message,
-            calibration_report
+            calibration_report,
+            stt_status,
+            stt_device,
+            stt_download_model,
+            stt_start,
+            stt_stop,
+            stt_cancel
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

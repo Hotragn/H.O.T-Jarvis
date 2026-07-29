@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pickVoice, sanitizeForSpeech } from "./voice";
+import { chooseSttRoute, pickVoice, sanitizeForSpeech, sttHint } from "./voice";
 
 describe("pickVoice", () => {
   const voice = (name: string, lang: string) => ({ name, lang });
@@ -42,5 +42,47 @@ describe("sanitizeForSpeech", () => {
     const spoken = sanitizeForSpeech(long);
     expect(spoken.length).toBeLessThanOrEqual(600);
     expect(spoken.endsWith(".")).toBe(true);
+  });
+});
+
+describe("chooseSttRoute", () => {
+  it("prefers the local model, even when the web recognizer exists", () => {
+    // Privacy is the point: the browser recognizer usually round-trips to a
+    // cloud service, so local wins whenever it's ready.
+    expect(chooseSttRoute({ state: "ready" }, true)).toBe("local");
+    expect(chooseSttRoute({ state: "ready" }, false)).toBe("local");
+  });
+
+  it("asks for the download when the engine is present but the model isn't", () => {
+    expect(chooseSttRoute({ state: "needs_download" }, true)).toBe("download");
+    expect(chooseSttRoute({ state: "needs_download" }, false)).toBe("download");
+  });
+
+  it("falls back to the web recognizer only when there is no local engine", () => {
+    expect(chooseSttRoute({ state: "not_compiled" }, true)).toBe("web");
+    expect(chooseSttRoute(null, true)).toBe("web");
+  });
+
+  it("reports nothing available rather than offering a dead button", () => {
+    expect(chooseSttRoute({ state: "not_compiled" }, false)).toBe("none");
+    expect(chooseSttRoute(null, false)).toBe("none");
+  });
+});
+
+describe("sttHint", () => {
+  it("names the local model and stresses that it stays on the machine", () => {
+    const hint = sttHint("local", "tiny.en");
+    expect(hint).toContain("tiny.en");
+    expect(hint).toContain("this machine");
+  });
+
+  it("states the one-time download size up front", () => {
+    expect(sttHint("download", "tiny.en", 43)).toContain("43 MB");
+  });
+
+  it("has an honest line for every route", () => {
+    for (const route of ["local", "download", "web", "none"] as const) {
+      expect(sttHint(route).length).toBeGreaterThan(0);
+    }
   });
 });

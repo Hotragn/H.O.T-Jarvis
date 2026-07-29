@@ -1,3 +1,4 @@
+pub mod audio;
 pub mod authoring;
 pub mod calibration;
 pub mod confidence;
@@ -8,4 +9,7 @@ pub mod reliability;
 pub mod replay;
 pub mod router;
 pub mod skills;
+pub mod stt;
 pub mod tools;
+#[cfg(feature = "local-whisper")]
+pub mod whisper;

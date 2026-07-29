@@ -89,4 +89,45 @@ export function stopSpeaking(): void {
 }
 
 export const STT_UNAVAILABLE_MESSAGE =
-  "Voice input isn't available in this window yet: the Windows WebView doesn't ship a speech recognizer. A fully local speech-to-text engine (Whisper, running on your machine) is on the roadmap — voice replies already work.";
+  "Voice input isn't available in this window: the Windows WebView doesn't ship a speech recognizer, and this build has no local speech model. Rebuild with `--features local-whisper` for fully on-device dictation — voice replies already work.";
+
+// ---- Voice v1 routing (pure; unit-tested) ----
+
+/// Which engine a mic press should use.
+/// - `local`: Whisper on this machine (preferred — private, offline, and the
+///   only option that works inside WebView2).
+/// - `download`: local engine is compiled in but the model isn't cached yet.
+/// - `web`: fall back to the WebView's own recognizer where it exists.
+/// - `none`: nothing can hear; say so honestly.
+export type SttRoute = "local" | "download" | "web" | "none";
+
+/// Deliberately prefers local over the Web Speech API even when both exist:
+/// the browser recognizer streams audio to a cloud service on most platforms,
+/// which breaks the promise that nothing leaves the machine.
+export function chooseSttRoute(
+  readiness: { state: string } | null,
+  webRecognizerAvailable: boolean,
+): SttRoute {
+  switch (readiness?.state) {
+    case "ready":
+      return "local";
+    case "needs_download":
+      return "download";
+    default:
+      return webRecognizerAvailable ? "web" : "none";
+  }
+}
+
+/// One-line status for the mic button's tooltip.
+export function sttHint(route: SttRoute, model?: string, approxMb?: number): string {
+  switch (route) {
+    case "local":
+      return `push to talk — ${model ?? "Whisper"} running on this machine`;
+    case "download":
+      return `click to download the speech model (~${approxMb ?? 43} MB, one time)`;
+    case "web":
+      return "push to talk — using this window's recognizer";
+    case "none":
+      return "voice input not available in this build";
+  }
+}

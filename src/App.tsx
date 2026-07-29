@@ -11,6 +11,11 @@ import {
   getTelemetry,
   rateMessage,
   reflectIfDue,
+  sttDownloadModel,
+  sttStart,
+  sttStatus,
+  sttStop,
+  type SttReadiness,
   type Status,
   type Telemetry,
 } from "./lib/ipc";
@@ -23,11 +28,13 @@ import {
   type Theme,
 } from "./lib/theme";
 import {
+  chooseSttRoute,
   recognitionCtor,
   speak,
   stopSpeaking,
   STT_UNAVAILABLE_MESSAGE,
   sttAvailable,
+  sttHint,
   ttsAvailable,
 } from "./lib/voice";
 import EventsView from "./views/EventsView";
@@ -93,6 +100,8 @@ export default function App() {
   const [listening, setListening] = useState(false);
   /// Local echo of grades given this session, so the buttons show their state.
   const [ratings, setRatings] = useState<Record<number, boolean>>({});
+  const [stt, setStt] = useState<SttReadiness | null>(null);
+  const [transcribing, setTranscribing] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLInputElement>(null);
   const recognizerRef = useRef<{ stop: () => void } | null>(null);
@@ -104,6 +113,11 @@ export default function App() {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem(THEME_STORAGE_KEY, theme);
   }, [theme]);
+
+  // Ask the backend how it can hear, so the mic button tells the truth.
+  useEffect(() => {
+    sttStatus().then(setStt).catch(() => setStt(null));
+  }, []);
 
   useEffect(() => {
     getStatus().then(setStatus).catch(() => setStatus(null));
@@ -220,8 +234,73 @@ export default function App() {
     });
   }, []);
 
+  const say = useCallback((content: string) => {
+    setItems((prev) => [...prev, { key: `s-${Date.now()}`, role: "system", content }]);
+  }, []);
+
+  // Voice v1: the local Whisper path. Audio is captured and transcribed in the
+  // Rust core, which is the only way dictation can work inside WebView2 (it has
+  // no SpeechRecognition) and the only way it stays on this machine.
+  const toggleLocalListening = useCallback(async () => {
+    if (transcribing) return;
+    if (listening) {
+      setListening(false);
+      setTranscribing(true);
+      try {
+        const text = await sttStop();
+        if (text) {
+          setDraft((d) => (d ? `${d} ${text}` : text));
+          composerRef.current?.focus();
+        } else {
+          say("I didn't catch anything — try again a little closer to the mic.");
+        }
+      } catch (e) {
+        say(String(e));
+      } finally {
+        setTranscribing(false);
+      }
+      return;
+    }
+    stopSpeaking(); // barge-in
+    setSpeaking(false);
+    try {
+      await sttStart();
+      setListening(true);
+    } catch (e) {
+      say(String(e));
+    }
+  }, [listening, transcribing, say]);
+
+  // Fetches the model once, then re-checks readiness so the button flips to
+  // real push-to-talk without a restart.
+  const downloadSttModel = useCallback(async () => {
+    if (transcribing) return;
+    setTranscribing(true);
+    const mb = stt?.state === "needs_download" ? stt.approx_mb : 43;
+    say(`Downloading the speech model (~${mb} MB, one time). This stays on your machine.`);
+    try {
+      await sttDownloadModel();
+      const next = await sttStatus();
+      setStt(next);
+      say("Speech model ready — the mic button now runs entirely on your machine.");
+    } catch (e) {
+      say(String(e));
+    } finally {
+      setTranscribing(false);
+    }
+  }, [stt, transcribing, say]);
+
   // Push-to-talk: click to listen, click again (or silence) to stop.
   const toggleListening = useCallback(() => {
+    const route = chooseSttRoute(stt, sttAvailable);
+    if (route === "local") {
+      void toggleLocalListening();
+      return;
+    }
+    if (route === "download") {
+      void downloadSttModel();
+      return;
+    }
     if (listening) {
       recognizerRef.current?.stop();
       return;
@@ -259,7 +338,7 @@ export default function App() {
     recognizerRef.current = recognizer;
     setListening(true);
     recognizer.start();
-  }, [listening]);
+  }, [listening, stt, toggleLocalListening, downloadSttModel]);
 
   const send = useCallback(async () => {
     const text = draft.trim();
@@ -315,7 +394,8 @@ export default function App() {
   }, []);
 
   const pill = describeStatus(status);
-  const coreState: CoreState = busy
+  const micRoute = chooseSttRoute(stt, sttAvailable);
+  const coreState: CoreState = busy || transcribing
     ? "thinking"
     : listening
       ? "listening"
@@ -508,12 +588,23 @@ export default function App() {
                 type="button"
                 className="mic-btn"
                 data-active={listening}
-                data-supported={sttAvailable}
-                title={sttAvailable ? "push to talk" : "voice input not available here yet"}
-                aria-label={listening ? "stop listening" : "start voice input"}
+                data-busy={transcribing}
+                data-supported={micRoute !== "none"}
+                title={sttHint(
+                  micRoute,
+                  stt?.state === "ready" ? stt.model : undefined,
+                  stt?.state === "needs_download" ? stt.approx_mb : undefined,
+                )}
+                aria-label={
+                  micRoute === "download"
+                    ? "download the local speech model"
+                    : listening
+                      ? "stop listening and transcribe"
+                      : "start voice input"
+                }
                 onClick={toggleListening}
               >
-                {listening ? "◉" : "🎙"}
+                {transcribing ? "…" : listening ? "◉" : micRoute === "download" ? "⇩" : "🎙"}
               </button>
               <button
                 className="send-btn"
