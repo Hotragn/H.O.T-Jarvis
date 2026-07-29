@@ -717,7 +717,23 @@ fn resolve_data_dir(app: &tauri::App) -> Result<PathBuf, Box<dyn std::error::Err
 pub fn run() {
     // Dev convenience: pick up a repo-root .env; harmless if absent.
     let _ = dotenvy::dotenv();
-    tauri::Builder::default()
+
+    #[allow(unused_mut)]
+    let mut builder = tauri::Builder::default();
+
+    // Desktop-only ambient presence: a global summon hotkey and launch-at-login.
+    // The tray itself is wired inside setup() so it can read the autostart state.
+    #[cfg(desktop)]
+    {
+        builder = builder
+            .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+            .plugin(tauri_plugin_autostart::init(
+                tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+                None,
+            ));
+    }
+
+    builder
         .setup(|app| {
             let data_dir = resolve_data_dir(app)?;
             let memory = MemoryStore::open(&data_dir.join("jarvis.sqlite3"))?;
@@ -738,7 +754,22 @@ pub fn run() {
                 system: Mutex::new(sysinfo::System::new()),
                 started: Instant::now(),
             });
+            #[cfg(desktop)]
+            setup_desktop_ambient(app)?;
             Ok(())
+        })
+        // Closing the window hides Jarvis to the tray instead of quitting, so it
+        // stays a keystroke away. Quitting for real is the tray's "Quit" item.
+        .on_window_event(|window, event| {
+            #[cfg(desktop)]
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let _ = window.hide();
+                api.prevent_close();
+            }
+            #[cfg(not(desktop))]
+            {
+                let _ = (window, event);
+            }
         })
         .invoke_handler(tauri::generate_handler![
             get_status,
@@ -764,4 +795,103 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+// --- desktop ambient presence: tray, global hotkey, launch-at-login (§6.5) ---
+
+/// Wire the system tray and the global summon hotkey. Called from setup() on
+/// desktop only. The tray gives Jarvis a home when its window is hidden; the
+/// hotkey (Ctrl+Shift+J) brings it back from anywhere.
+#[cfg(desktop)]
+fn setup_desktop_ambient(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    use tauri::menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder};
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+    use tauri_plugin_autostart::ManagerExt;
+    use tauri_plugin_global_shortcut::{
+        Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
+    };
+
+    let handle = app.handle();
+
+    // Tray menu: show, a checkbox that mirrors the OS launch-at-login state, quit.
+    let autostart_on = handle.autolaunch().is_enabled().unwrap_or(false);
+    let show_item = MenuItemBuilder::with_id("tray_show", "Show H.O.T-Jarvis").build(app)?;
+    let autostart_item = CheckMenuItemBuilder::with_id("tray_autostart", "Start at login")
+        .checked(autostart_on)
+        .build(app)?;
+    let quit_item = MenuItemBuilder::with_id("tray_quit", "Quit").build(app)?;
+    let menu = MenuBuilder::new(app)
+        .items(&[&show_item, &autostart_item, &quit_item])
+        .build()?;
+
+    TrayIconBuilder::with_id("main")
+        .tooltip("H.O.T-Jarvis")
+        .icon(
+            app.default_window_icon()
+                .cloned()
+                .ok_or("no default window icon")?,
+        )
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "tray_show" => show_main_window(app),
+            "tray_quit" => app.exit(0),
+            "tray_autostart" => {
+                let mgr = app.autolaunch();
+                if mgr.is_enabled().unwrap_or(false) {
+                    let _ = mgr.disable();
+                } else {
+                    let _ = mgr.enable();
+                }
+            }
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            // A left click on the icon toggles the window, like most tray apps.
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                toggle_main_window(tray.app_handle());
+            }
+        })
+        .build(app)?;
+
+    // Global summon: Ctrl+Shift+J toggles the window from anywhere.
+    let toggle = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyJ);
+    handle
+        .global_shortcut()
+        .on_shortcut(toggle, move |app, _shortcut, event| {
+            if event.state() == ShortcutState::Pressed {
+                toggle_main_window(app);
+            }
+        })?;
+
+    Ok(())
+}
+
+#[cfg(desktop)]
+fn show_main_window(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+#[cfg(desktop)]
+fn toggle_main_window(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    if let Some(window) = app.get_webview_window("main") {
+        if window.is_visible().unwrap_or(false) {
+            let _ = window.hide();
+        } else {
+            let _ = window.show();
+            let _ = window.unminimize();
+            let _ = window.set_focus();
+        }
+    }
 }

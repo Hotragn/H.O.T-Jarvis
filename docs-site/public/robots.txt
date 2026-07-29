@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://hot-jarvis.vercel.app/sitemap-index.xml
+Sitemap: https://hotragn.github.io/H.O.T-Jarvis/docs/sitemap-index.xml

@@ -1,0 +1,76 @@
+name: Deploy site (landing + docs) to GitHub Pages
+
+# Publishes the whole public site to GitHub Pages on every push to main that
+# touches it: the static landing/ site at the root, and the Astro docs built
+# under /docs. One-time setup: repo Settings → Pages → Build and deployment
+# → Source = "GitHub Actions".
+#   Landing: https://hotragn.github.io/H.O.T-Jarvis/
+#   Docs:    https://hotragn.github.io/H.O.T-Jarvis/docs/
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "landing/**"
+      - "docs-site/**"
+      - ".github/workflows/deploy-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One in-flight Pages deploy at a time; newer pushes supersede older runs.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: docs-site/package-lock.json
+
+      # Build the Astro docs with the /docs base so every asset and link
+      # resolves under the project-page subpath.
+      - name: Build docs
+        working-directory: docs-site
+        env:
+          DOCS_SITE: https://hotragn.github.io
+          DOCS_BASE: /H.O.T-Jarvis/docs
+        run: |
+          npm ci
+          npm run build
+
+      # Assemble the artifact: landing at the root, docs under /docs.
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          cp -r landing/. _site/
+          mkdir -p _site/docs
+          cp -r docs-site/dist/. _site/docs/
+
+      # Pages must already be enabled by the owner (Source = GitHub Actions);
+      # the GITHUB_TOKEN cannot create the site, so enablement stays false.
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: false
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -18,7 +18,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
@@ -27,6 +27,14 @@ thiserror = "2"
 dotenvy = "0.15"
 sysinfo = "0.33"
 rhai = "1"
+
+# Ambient-presence stack (desktop only): live in the tray, summon with a global
+# hotkey, optionally start at login. Excluded from mobile (iOS/Android) builds.
+# Note: this must be a built-in target cfg — Cargo can't see Tauri's `desktop`
+# rustc cfg here, so we spell out "not mobile" explicitly.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-autostart = "2"
 
 [dev-dependencies]
 tempfile = "3"
