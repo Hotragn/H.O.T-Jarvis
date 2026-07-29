@@ -32,7 +32,17 @@ Tauri v2 supports iOS, so we reuse most of what exists rather than rewrite:
 | Notes / files | ✅ | Confined to the app's sandbox container (already how `NotesTool` works). |
 | Data dir | ✅ | `app_data_dir()` resolves to the app's Documents/Application Support on iOS. |
 
-## The inference fork (your decision — all three planned)
+## The inference fork — IMPLEMENTED as the pragmatic path
+
+The recommendation below is now built (settings view, PR feat/ios-ready):
+**companion by default, cloud as opt-in fallback.** Providers and models are
+configurable at runtime inside the app — no env vars, which iOS doesn't have.
+On the phone, set the Ollama URL to your desktop's LAN address (e.g.
+`http://192.168.1.20:11434`, desktop Ollama started with `OLLAMA_HOST=0.0.0.0`)
+and the desktop does the thinking; add a free Groq/OpenRouter key for an
+opt-in cloud fallback. On-device inference (option 2) remains future work.
+
+## The inference fork (original analysis — all three planned)
 
 On iOS the phone can't run Ollama. Three ways to keep it useful; pick before build.
 
@@ -143,10 +153,36 @@ until it can be re-tested there.)
 
 ## What's prepared here vs. still needed
 
-- ✅ Prepared (this PR): architecture, the inference fork with a recommendation,
-  the Review-guideline analysis (incl. the 2.5.2 skill-engine consideration),
-  privacy/permission strings, `PrivacyInfo.xcprivacy` template, asset specs, and
-  the exact build/submit steps.
-- ⏳ Needs your Mac: `tauri ios init`, signing, Simulator/device runs, the build.
+- ✅ Architecture, Review-guideline analysis (incl. 2.5.2), privacy strings,
+  `PrivacyInfo.xcprivacy` template, asset specs, build/submit steps.
+- ✅ **Inference fork implemented** — runtime provider/model settings in-app
+  (companion mode + optional cloud fallback). No router work left for iOS.
+- ✅ **iOS UI pass done** — safe-area insets (`viewport-fit=cover` + `env()`),
+  44pt touch targets, 16px inputs (no focus zoom), phone-width layout,
+  hover-only controls always visible on touch, system telemetry hidden on iOS
+  (sandboxed stats would be decoration), honest "on-device · private" line.
+- ✅ **`tauri.conf.json` iOS block** — minimum iOS 15, usage-description
+  strings, `ITSAppUsesNonExemptEncryption=false`. Add `developmentTeam` on
+  the Mac (it's your Team ID from developer.apple.com).
+- ✅ **Marketing/listing package** — name, subtitle, description, keywords,
+  screenshots plan, review notes: see [APPSTORE.md](APPSTORE.md).
+- ✅ Mobile safety: cpal/tray/hotkey/autostart excluded from mobile targets;
+  voice-input commands return honest errors on iOS (native SFSpeech plugin is
+  future work; TTS via `speechSynthesis` works in WKWebView).
+- ⏳ Needs your Mac: `tauri ios init`, `developmentTeam`, Simulator/device
+  runs, screenshots, the build.
 - ⏳ Needs enrollment ($99): App Store Connect record, TestFlight, submission.
-- ⏳ Needs your decision: the inference fork (1/2/3 above) before the router work.
+
+## Mac-day checklist (condensed, in order)
+
+1. `xcode-select --install`; `rustup target add aarch64-apple-ios aarch64-apple-ios-sim`
+2. `npm install && npm run tauri ios init`
+3. Add `developmentTeam` to the `bundle.iOS` block; drop `PrivacyInfo.xcprivacy`
+   into the generated Xcode project (Build Phases → Copy Bundle Resources).
+4. `npm run tauri ios dev` — verify on Simulator: safe areas, chat, notes,
+   settings→companion URL against your desktop, memory persists across relaunch.
+5. Capture the 5 screenshots per [APPSTORE.md](APPSTORE.md) (6.7" + 6.5").
+6. Enroll ($99) → App Store Connect: new app, paste name/subtitle/description/
+   keywords/review-notes from APPSTORE.md, upload build via
+   `npm run tauri ios build` + Organizer/Transporter.
+7. TestFlight internal pass → Submit for review.

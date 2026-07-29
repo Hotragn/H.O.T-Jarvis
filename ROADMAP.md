@@ -58,7 +58,8 @@ Groundwork planned in [docs/ios/README.md](docs/ios/README.md). Build/submit nee
 - [ ] `blocked (owner decision)` Choose the iOS inference model: companion-to-desktop (recommended) / on-device / cloud tiers
 - [ ] `blocked (needs Mac)` `tauri ios init` + signing + Simulator run
 - [ ] `blocked (needs $99 enrollment)` App Store Connect record, TestFlight, submission
-- [ ] `ready` iOS UI pass: safe-area insets, touch targets, hide desktop-only telemetry; native AVSpeech/SFSpeech voice plugin
+- [x] `done` iOS UI pass: safe-area insets (viewport-fit=cover + env()), 44pt touch targets, 16px inputs (no focus zoom), phone-width responsive layout, hover-only controls always visible on touch, system telemetry hidden on iOS. Native AVSpeech/SFSpeech plugin still future work.
+- [x] `done` Inference fork implemented (companion default): runtime provider + custom model settings in-app (settings tab, ctrl+7) — Ollama URL/model, Groq + OpenRouter keys/models — applied without restart, persisted in the DB (env still seeds defaults). tauri.conf.json carries the iOS bundle block (usage strings, min iOS 15, encryption-exempt). App Store listing package in docs/ios/APPSTORE.md.
 
 ## Distribution / front door
 
@@ -71,7 +72,7 @@ Groundwork planned in [docs/ios/README.md](docs/ios/README.md). Build/submit nee
 ## Chores
 
 - [x] `done` Export completeness: events + notes in the memory export; wipe also clears the event log
-- [ ] `ready` Note deletion in the notes view
+- [x] `done` Note deletion in the notes view — undoable: content captured at delete, restorable from the timeline
 
 ## Backlog / open problems
 

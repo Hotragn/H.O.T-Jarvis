@@ -138,6 +138,11 @@ export async function readNote(name: string): Promise<string> {
   return invoke<string>("read_note", { name });
 }
 
+export async function deleteNote(name: string): Promise<void> {
+  if (!inTauri) throw new Error("No backend in the browser preview.");
+  return invoke<void>("delete_note", { name });
+}
+
 export async function saveNote(title: string, content: string): Promise<string> {
   if (!inTauri) throw new Error("No backend in the browser preview.");
   return invoke<string>("save_note", { title, content });
@@ -223,6 +228,36 @@ export async function reflectNow(): Promise<Insight[]> {
 export async function reflectIfDue(): Promise<number | null> {
   if (!inTauri) return null;
   return invoke<number | null>("reflect_if_due");
+}
+
+// --- provider settings (custom models; the iOS companion enabler) ---
+
+export interface ProviderSettings {
+  ollama_base_url: string;
+  ollama_model: string;
+  groq_api_key: string;
+  groq_model: string;
+  openrouter_api_key: string;
+  openrouter_model: string;
+}
+
+export async function getProviderSettings(): Promise<ProviderSettings | null> {
+  if (!inTauri) return null;
+  return invoke<ProviderSettings>("get_provider_settings");
+}
+
+/// Saves and applies immediately; resolves to whether the local endpoint is
+/// now reachable (companion status).
+export async function setProviderSettings(s: ProviderSettings): Promise<boolean> {
+  if (!inTauri) throw new Error("No backend in the browser preview.");
+  return invoke<boolean>("set_provider_settings", {
+    ollamaBaseUrl: s.ollama_base_url,
+    ollamaModel: s.ollama_model,
+    groqApiKey: s.groq_api_key,
+    groqModel: s.groq_model,
+    openrouterApiKey: s.openrouter_api_key,
+    openrouterModel: s.openrouter_model,
+  });
 }
 
 // --- Confidence v1: calibration tracking ---

@@ -262,6 +262,23 @@ fn save_note(
     Ok(slug)
 }
 
+/// Deletes a note, capturing its content first so the deletion is undoable
+/// from the timeline like every other destructive action.
+#[tauri::command]
+fn delete_note(state: tauri::State<'_, AppState>, name: String) -> Result<(), String> {
+    let previous = state.notes.read_note(&name).map_err(|e| e.to_string())?;
+    let removed = state.notes.delete_note(&name).map_err(|e| e.to_string())?;
+    if !removed {
+        return Err(format!("note \"{name}\" was already gone"));
+    }
+    log_event(
+        &state,
+        "note.deleted",
+        serde_json::json!({ "slug": name, "previous": previous }),
+    );
+    Ok(())
+}
+
 #[tauri::command]
 fn list_notes(state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
     state.notes.list_notes().map_err(|e| e.to_string())
@@ -617,6 +634,22 @@ fn undo_event(state: tauri::State<'_, AppState>, event_id: u64) -> Result<String
                 serde_json::json!({ "undoes": event.id, "msg_id": msg_id }),
             );
             "message removed from memory".to_string()
+        }
+        "note.deleted" => {
+            let slug = p["slug"].as_str().ok_or("event has no note slug")?;
+            let previous = p["previous"]
+                .as_str()
+                .ok_or("this deletion predates undo support")?;
+            state
+                .notes
+                .save_note(slug, previous)
+                .map_err(|e| e.to_string())?;
+            log_event(
+                &state,
+                "undo.note",
+                serde_json::json!({ "undoes": event.id, "slug": slug }),
+            );
+            format!("note \"{slug}\" restored")
         }
         "note.saved" => {
             let slug = p["slug"].as_str().ok_or("event has no note slug")?;
@@ -1021,6 +1054,109 @@ fn maintain_insights(state: tauri::State<'_, AppState>) -> Result<forgetting::Fo
     Ok(plan)
 }
 
+// --- runtime provider settings (custom models; iOS companion enabler) ---
+
+/// Facts keys for saved provider settings. An empty saved value means "no
+/// override" and falls back to env/default.
+const CFG_KEYS: [(&str, u8); 6] = [
+    ("config.ollama_base_url", 0),
+    ("config.ollama_model", 1),
+    ("config.groq_api_key", 2),
+    ("config.groq_model", 3),
+    ("config.openrouter_api_key", 4),
+    ("config.openrouter_model", 5),
+];
+
+/// Overlays saved settings from the facts table onto an env-seeded config.
+fn apply_saved_provider_config(mem: &MemoryStore, cfg: &mut RouterConfig) {
+    let read = |key: &str| -> Option<String> {
+        mem.get_fact(key)
+            .ok()
+            .flatten()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+    };
+    for (key, which) in CFG_KEYS {
+        let Some(value) = read(key) else { continue };
+        match which {
+            0 => cfg.ollama_base_url = value,
+            1 => cfg.ollama_model = value,
+            2 => cfg.groq_api_key = Some(value),
+            3 => cfg.groq_model = value,
+            4 => cfg.openrouter_api_key = Some(value),
+            5 => cfg.openrouter_model = value,
+            _ => {}
+        }
+    }
+}
+
+/// The full current provider configuration, for the settings view. This is a
+/// local-first app: the values (including keys) are the user's own, stored on
+/// their machine, shown back to them in their own settings UI.
+#[derive(serde::Serialize)]
+struct ProviderSettings {
+    ollama_base_url: String,
+    ollama_model: String,
+    groq_api_key: String,
+    groq_model: String,
+    openrouter_api_key: String,
+    openrouter_model: String,
+}
+
+#[tauri::command]
+fn get_provider_settings(state: tauri::State<'_, AppState>) -> ProviderSettings {
+    let cfg = state.router.config();
+    ProviderSettings {
+        ollama_base_url: cfg.ollama_base_url,
+        ollama_model: cfg.ollama_model,
+        groq_api_key: cfg.groq_api_key.unwrap_or_default(),
+        groq_model: cfg.groq_model,
+        openrouter_api_key: cfg.openrouter_api_key.unwrap_or_default(),
+        openrouter_model: cfg.openrouter_model,
+    }
+}
+
+/// Saves provider settings and applies them immediately — no restart, no .env.
+/// Point the Ollama URL at another machine (e.g. your desktop from a phone) and
+/// that machine becomes the brain; that is companion mode.
+#[tauri::command]
+async fn set_provider_settings(
+    state: tauri::State<'_, AppState>,
+    ollama_base_url: String,
+    ollama_model: String,
+    groq_api_key: String,
+    groq_model: String,
+    openrouter_api_key: String,
+    openrouter_model: String,
+) -> Result<bool, String> {
+    let values = [
+        ("config.ollama_base_url", ollama_base_url.trim()),
+        ("config.ollama_model", ollama_model.trim()),
+        ("config.groq_api_key", groq_api_key.trim()),
+        ("config.groq_model", groq_model.trim()),
+        ("config.openrouter_api_key", openrouter_api_key.trim()),
+        ("config.openrouter_model", openrouter_model.trim()),
+    ];
+    {
+        let mem = state.memory.lock().map_err(|e| e.to_string())?;
+        for (key, value) in values {
+            mem.set_fact(key, value).map_err(|e| e.to_string())?;
+        }
+        let mut cfg = RouterConfig::from_env();
+        apply_saved_provider_config(&mem, &mut cfg);
+        state.router.set_config(cfg);
+    }
+    // Keys never go into the event log; log that settings changed, not what to.
+    log_event(
+        &state,
+        "settings.providers_changed",
+        serde_json::json!({ "fields": values.iter().filter(|(_, v)| !v.is_empty()).count() }),
+    );
+    // Tell the caller whether the (possibly new) local endpoint is reachable,
+    // so the settings view can report companion status honestly.
+    Ok(state.router.ollama_reachable().await)
+}
+
 fn resolve_data_dir(app: &tauri::App) -> Result<PathBuf, Box<dyn std::error::Error>> {
     match std::env::var("JARVIS_DATA_DIR") {
         Ok(dir) if !dir.trim().is_empty() => Ok(PathBuf::from(dir.trim())),
@@ -1052,7 +1188,13 @@ pub fn run() {
         .setup(|app| {
             let data_dir = resolve_data_dir(app)?;
             let memory = MemoryStore::open(&data_dir.join("jarvis.sqlite3"))?;
-            let router = Router::new(RouterConfig::from_env());
+            // Providers: env seeds the defaults, then anything saved from the
+            // settings view wins. On iOS there are no env vars at all, so the
+            // DB overlay is the only way the phone can be configured — this is
+            // what makes companion mode (phone -> desktop Ollama) possible.
+            let mut router_cfg = RouterConfig::from_env();
+            apply_saved_provider_config(&memory, &mut router_cfg);
+            let router = Router::new(router_cfg);
             let notes = NotesTool::new(&data_dir);
             let skills = SkillEngine::new(&data_dir);
             let mut events = EventLog::open(&data_dir.join("events.jsonl"))?;
@@ -1098,6 +1240,7 @@ pub fn run() {
             get_telemetry,
             get_events,
             save_note,
+            delete_note,
             list_notes,
             read_note,
             save_skill,
@@ -1115,6 +1258,8 @@ pub fn run() {
             rate_message,
             calibration_report,
             maintain_insights,
+            get_provider_settings,
+            set_provider_settings,
             stt_status,
             stt_device,
             stt_download_model,

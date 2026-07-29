@@ -22,6 +22,7 @@ import {
 } from "./lib/ipc";
 import { confidenceLabel } from "./lib/confidence";
 import { describeStatus } from "./lib/status";
+import { platform, showSystemTelemetry } from "./lib/platform";
 import {
   nextTheme,
   resolveInitialTheme,
@@ -42,6 +43,7 @@ import EventsView from "./views/EventsView";
 import MemoryView from "./views/MemoryView";
 import NotesView from "./views/NotesView";
 import ReflectionsView from "./views/ReflectionsView";
+import SettingsView from "./views/SettingsView";
 import SkillsView from "./views/SkillsView";
 
 interface ChatItem {
@@ -53,7 +55,7 @@ interface ChatItem {
   msgId?: number | null;
 }
 
-type Tab = "chat" | "skills" | "notes" | "memory" | "events" | "reflections";
+type Tab = "chat" | "skills" | "notes" | "memory" | "events" | "reflections" | "settings";
 
 const TABS: { id: Tab; label: string; shortcut: string }[] = [
   { id: "chat", label: "chat", shortcut: "ctrl+1" },
@@ -62,6 +64,7 @@ const TABS: { id: Tab; label: string; shortcut: string }[] = [
   { id: "memory", label: "memory", shortcut: "ctrl+4" },
   { id: "events", label: "events", shortcut: "ctrl+5" },
   { id: "reflections", label: "reflections", shortcut: "ctrl+6" },
+  { id: "settings", label: "settings", shortcut: "ctrl+7" },
 ];
 
 const PALETTE_COMMANDS: PaletteCommand[] = [
@@ -71,6 +74,7 @@ const PALETTE_COMMANDS: PaletteCommand[] = [
   { id: "tab-memory", label: "Go to memory", hint: "ctrl+4" },
   { id: "tab-events", label: "Go to event log", hint: "ctrl+5" },
   { id: "tab-reflections", label: "Go to reflections", hint: "ctrl+6" },
+  { id: "tab-settings", label: "Go to settings", hint: "ctrl+7" },
   { id: "focus-composer", label: "Talk to Jarvis", hint: "chat" },
   { id: "theme-toggle", label: "Toggle theme" },
 ];
@@ -198,6 +202,7 @@ export default function App() {
     else if (id === "tab-memory") setTab("memory");
     else if (id === "tab-events") setTab("events");
     else if (id === "tab-reflections") setTab("reflections");
+    else if (id === "tab-settings") setTab("settings");
     else if (id === "theme-toggle") setTheme((t) => nextTheme(t));
     else if (id === "focus-composer") {
       setTab("chat");
@@ -211,7 +216,7 @@ export default function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPaletteOpen((open) => !open);
-      } else if (e.ctrlKey && ["1", "2", "3", "4", "5", "6"].includes(e.key)) {
+      } else if (e.ctrlKey && ["1", "2", "3", "4", "5", "6", "7"].includes(e.key)) {
         e.preventDefault();
         setTab(TABS[Number(e.key) - 1].id);
       }
@@ -439,6 +444,7 @@ export default function App() {
         : status?.ready
           ? "idle"
           : "offline";
+  const systemTelemetry = showSystemTelemetry(platform);
   const messageCount = telemetry?.message_count ?? status?.message_count ?? 0;
   const factCount = telemetry?.fact_count ?? status?.fact_count ?? 0;
 
@@ -508,13 +514,15 @@ export default function App() {
               {telemetry ? telemetry.note_count : "—"} notes
             </span>
           </div>
-          <div className="readout">
-            <span className="readout-label">cpu</span>
-            <span className="readout-value">
-              {telemetry ? `${Math.round(telemetry.cpu_percent)}%` : "—"}
-            </span>
-            <Sparkline values={cpuHistory} theme={theme} label="cpu history" />
-          </div>
+          {systemTelemetry && (
+            <div className="readout">
+              <span className="readout-label">cpu</span>
+              <span className="readout-value">
+                {telemetry ? `${Math.round(telemetry.cpu_percent)}%` : "—"}
+              </span>
+              <Sparkline values={cpuHistory} theme={theme} label="cpu history" />
+            </div>
+          )}
         </div>
 
         <ArcCore state={coreState} theme={theme} confidence={lastConfidence} />
@@ -531,9 +539,11 @@ export default function App() {
             <span className="readout-label">system</span>
             <span className="readout-value">{clock}</span>
             <span className="readout-sub">
-              {telemetry
-                ? `${formatBytes(telemetry.mem_used)} / ${formatBytes(telemetry.mem_total)} · up ${formatDuration(telemetry.uptime_secs)}`
-                : "telemetry offline in browser preview"}
+              {!systemTelemetry
+                ? "on-device · private" // iOS sandboxes system stats; say something true instead
+                : telemetry
+                  ? `${formatBytes(telemetry.mem_used)} / ${formatBytes(telemetry.mem_total)} · up ${formatDuration(telemetry.uptime_secs)}`
+                  : "telemetry offline in browser preview"}
             </span>
           </div>
         </div>
@@ -655,6 +665,7 @@ export default function App() {
         {tab === "notes" && <NotesView />}
         {tab === "events" && <EventsView />}
         {tab === "reflections" && <ReflectionsView />}
+        {tab === "settings" && <SettingsView />}
         {tab === "memory" && (
           <MemoryView
             messageCount={messageCount}
