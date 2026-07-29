@@ -6,10 +6,13 @@
 //! Whisper model, so dictation works offline, costs nothing, and no audio ever
 //! leaves the machine.
 //!
-//! Why pure-Rust inference (candle) instead of whisper.cpp bindings: those need
-//! cmake, a C++ compiler, and LLVM on every contributor's machine. candle is a
-//! plain cargo dependency, which keeps "clone and run" true. It is slower than
-//! whisper.cpp, which is why the default model is the smallest useful one.
+//! Why candle instead of whisper.cpp bindings: those need cmake, a C++ compiler,
+//! and LLVM/libclang (with `LIBCLANG_PATH` set) on every contributor's machine.
+//! candle needs none of those, which keeps "clone and run" close to true. It is
+//! not entirely C-free — candle-core pulls tokenizers with default features,
+//! which builds Oniguruma from C, so a plain C compiler is still required — but
+//! that is a much lighter ask. candle is slower than whisper.cpp, which is why
+//! the default model is the smallest useful one.
 //!
 //! Everything here is deliberately inference-engine-agnostic: the catalog,
 //! cache layout, download bookkeeping, and transcript cleanup are pure logic
@@ -169,6 +172,25 @@ pub fn clean_transcript(raw: &str) -> String {
     }
 
     cleaned.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Joins per-window transcripts from a long take, dropping any window that is
+/// only a silence hallucination.
+///
+/// Filtering per window matters: a filler window concatenated with real speech
+/// ("open the notes" + "thank you") produces a string that no longer matches the
+/// filler list, so checking only the joined result lets it through.
+pub fn join_windows(pieces: &[String]) -> String {
+    let kept: Vec<&str> = pieces
+        .iter()
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty() && !is_probably_silence(p))
+        .collect();
+    let joined = clean_transcript(&kept.join(" "));
+    if is_probably_silence(&joined) {
+        return String::new();
+    }
+    joined
 }
 
 /// Whisper hallucinates filler on silence — a bare "thank you" or "you" from an
@@ -355,6 +377,43 @@ mod tests {
                 "{s:?} -> {cleaned:?} should read as silence"
             );
         }
+    }
+
+    #[test]
+    fn joining_windows_drops_a_hallucinated_tail() {
+        // The exact regression: a trailing silence window hallucinates "thank you",
+        // which would concatenate into "open the notes thank you" and slip past a
+        // check applied only to the joined string.
+        let pieces = vec!["open the notes".to_string(), "thank you".to_string()];
+        assert_eq!(join_windows(&pieces), "open the notes");
+    }
+
+    #[test]
+    fn joining_windows_keeps_every_real_window() {
+        let pieces = vec![
+            "remind me to call".to_string(),
+            "the dentist tomorrow".to_string(),
+        ];
+        assert_eq!(
+            join_windows(&pieces),
+            "remind me to call the dentist tomorrow"
+        );
+    }
+
+    #[test]
+    fn joining_only_filler_windows_yields_nothing() {
+        let pieces = vec!["thank you".to_string(), "you".to_string(), "".to_string()];
+        assert_eq!(join_windows(&pieces), "");
+        assert_eq!(join_windows(&[]), "");
+    }
+
+    #[test]
+    fn joining_windows_cleans_control_tokens_and_whitespace() {
+        let pieces = vec![
+            "<|0.00|> save this  note".to_string(),
+            "[BLANK_AUDIO]".to_string(),
+        ];
+        assert_eq!(join_windows(&pieces), "save this note");
     }
 
     #[test]

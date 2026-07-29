@@ -35,9 +35,16 @@ For a release build:
 npm run tauri build -- --features local-whisper
 ```
 
-No cmake, no C++ compiler, no LLVM needed — unlike `whisper.cpp` bindings, the
-inference here is plain Rust (via [candle](https://github.com/huggingface/candle)),
-so `cargo` handles everything.
+Inference runs through [candle](https://github.com/huggingface/candle), Hugging
+Face's Rust ML framework, so **no cmake and no LLVM/libclang** are needed —
+`whisper.cpp` bindings require all three plus a `LIBCLANG_PATH` environment
+variable, which is why they aren't used here.
+
+One honest caveat: this isn't a completely C-free build. `candle-core` depends on
+`tokenizers` with its default features, which compiles Oniguruma (`onig_sys`)
+from C. So you do need a working **C compiler** — the one that ships with the
+Rust MSVC toolchain on Windows, or the system `cc` on macOS and Linux. That's a
+far lighter requirement than cmake plus LLVM, but it isn't zero.
 
 ## First run: one download
 
