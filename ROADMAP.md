@@ -37,7 +37,7 @@ Machine-readable task queue. Status: `ready` | `in-progress` | `done` | `blocked
 - [x] `done` Skill library view with per-skill test status, create form, run panel
 - [x] `done` Reflection browser: dedicated view over the reflection insights (ctrl+6) — filter chips by kind (skill/provider/user/general) with counts, per-kind accented cards showing the lesson, its provenance (which events it came from), and date, plus "Reflect now"
 - [x] `done` Animated view transitions: keyed per-tab enter animation (the core stays as the persistent shared element), reduced-motion guarded
-- [ ] `ready` Shared-element morph between views (FLIP) as a richer follow-up
+- [x] `done` Shared-element morph between views (FLIP): one accent bar glides + scales under the active tab on every switch, done with transform only (translateX + scaleX off a 1px base) so it's GPU-cheap and layout-free; snaps on first paint and resize, reduced-motion guarded
 - [x] `done` Voice v0: spoken replies via OS voices (free, offline), voice toggle, barge-in, speaking/listening core states, push-to-talk where the platform provides recognition, honest fallback where it doesn't
 - [ ] `ready` Voice v1: fully local STT (Whisper on-device) so voice input works inside WebView2; then wake word + VAD + continuous conversation
 - [x] `done` System tray + global hotkey + launch-at-login: tray icon with show / start-at-login toggle / quit, left-click toggles the window, closing hides to tray, global Ctrl+Shift+J summons it from anywhere; desktop-only, mobile build unaffected (§6.5)
@@ -73,6 +73,5 @@ Groundwork planned in [docs/ios/README.md](docs/ios/README.md). Build/submit nee
 ## Backlog / open problems
 
 - Selective forgetting in memory (differentiator, hard)
-- Shared-element morph transitions between views
 - Cross-platform build matrix + auto-update flow on release tags
 - Optional Obsidian-vault connector (one skill, never a requirement)

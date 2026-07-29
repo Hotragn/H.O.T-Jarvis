@@ -123,9 +123,32 @@ body {
 
 /* --- tabs --- */
 .tab-bar {
+  position: relative;
   display: flex;
   gap: var(--space-2);
   margin-right: var(--space-2);
+}
+
+/* Shared-element indicator: one accent bar that FLIP-morphs (slides + scales,
+   transform only) under the active tab, instead of a per-tab static border.
+   Positioned/scaled from JS; base width is 1px so scaleX(n) reads as n px. */
+.tab-underline {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+  transform-origin: left center;
+  transform: translateX(0) scaleX(0);
+  transition: transform var(--dur-med) var(--ease-out);
+  pointer-events: none;
+}
+
+/* First paint places it without a slide-in from the left. */
+.tab-underline[data-init="true"] {
+  transition: none;
 }
 
 .tab {
@@ -148,7 +171,7 @@ body {
 
 .tab[data-active="true"] {
   color: var(--accent);
-  border-bottom-color: var(--accent);
+  /* underline is now the shared .tab-underline element, not a per-tab border */
 }
 
 .tab:focus-visible {
@@ -1096,5 +1119,8 @@ body {
   .view-swap,
   .view-area {
     animation: none;
+  }
+  .tab-underline {
+    transition: none;
   }
 }

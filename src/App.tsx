@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import ArcCore, { type CoreState } from "./components/ArcCore";
 import CommandPalette from "./components/CommandPalette";
 import Sparkline from "./components/Sparkline";
@@ -91,6 +91,9 @@ export default function App() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLInputElement>(null);
   const recognizerRef = useRef<{ stop: () => void } | null>(null);
+  const tabBarRef = useRef<HTMLElement>(null);
+  const underlineRef = useRef<HTMLSpanElement>(null);
+  const underlineReady = useRef(false);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -170,6 +173,35 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // Shared-element indicator: glide the accent bar under the active tab. This
+  // is a FLIP-style move done with transform only (translateX + scaleX off a
+  // 1px base), so it's GPU-cheap and never touches layout. `animate: false`
+  // snaps it (first paint, and on resize when tab widths change).
+  const placeUnderline = useCallback((animate: boolean) => {
+    const bar = tabBarRef.current;
+    const underline = underlineRef.current;
+    if (!bar || !underline) return;
+    const active = bar.querySelector<HTMLButtonElement>('.tab[data-active="true"]');
+    if (!active) return;
+    if (!animate) underline.setAttribute("data-init", "true");
+    underline.style.transform = `translateX(${active.offsetLeft}px) scaleX(${active.offsetWidth})`;
+    if (!animate) {
+      void underline.offsetWidth; // flush the no-transition placement
+      underline.removeAttribute("data-init");
+    }
+  }, []);
+
+  useLayoutEffect(() => {
+    placeUnderline(underlineReady.current);
+    underlineReady.current = true;
+  }, [tab, placeUnderline]);
+
+  useEffect(() => {
+    const onResize = () => placeUnderline(false);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [placeUnderline]);
 
   const toggleVoice = useCallback(() => {
     setVoiceOn((on) => {
@@ -288,7 +320,7 @@ export default function App() {
           <span className="brand-name">H.O.T-JARVIS</span>
           <span className="brand-sub">local-first assistant · free forever</span>
         </div>
-        <nav className="tab-bar" aria-label="views">
+        <nav className="tab-bar" aria-label="views" ref={tabBarRef}>
           {TABS.map((t) => (
             <button
               key={t.id}
@@ -301,6 +333,7 @@ export default function App() {
               {t.label}
             </button>
           ))}
+          <span className="tab-underline" ref={underlineRef} aria-hidden="true" />
         </nav>
         {ttsAvailable && (
           <button
