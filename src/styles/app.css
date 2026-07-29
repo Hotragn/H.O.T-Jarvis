@@ -534,6 +534,14 @@ body {
   opacity: 0.45;
 }
 
+/* Transcribing: the take is in, Whisper is thinking. Steady glow rather than
+   the listening pulse, so the two states aren't confusable. */
+.mic-btn[data-busy="true"] {
+  color: var(--accent-2);
+  border-color: var(--accent-2);
+  animation: none;
+}
+
 .mic-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;

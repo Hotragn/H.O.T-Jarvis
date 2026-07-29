@@ -17,6 +17,14 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[features]
+# Local speech-to-text (Whisper) runs entirely on-device. It's opt-in because
+# it pulls a pure-Rust ML stack (a few minutes of extra build time) and needs a
+# one-time model download. Everything else works without it, and the app tells
+# the user honestly which mode they're in.
+default = []
+local-whisper = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:tokenizers"]
+
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
 serde = { version = "1", features = ["derive"] }
@@ -27,6 +35,20 @@ thiserror = "2"
 dotenvy = "0.15"
 sysinfo = "0.33"
 rhai = "1"
+# Microphone capture. Pure Rust (WASAPI / CoreAudio / ALSA), no C++ toolchain,
+# so voice input works inside WebView2 where SpeechRecognition doesn't exist.
+cpal = "0.15"
+
+# Pure-Rust Whisper inference, enabled by the `local-whisper` feature. candle is
+# Hugging Face's Rust ML framework — no cmake/clang/C++ needed, unlike
+# whisper.cpp bindings. tokenizers drops its default features on purpose: the
+# default `onig` regex engine is a C library, and fancy-regex is pure Rust.
+candle-core = { version = "0.11", optional = true }
+candle-nn = { version = "0.11", optional = true }
+candle-transformers = { version = "0.11", optional = true }
+tokenizers = { version = "0.23", optional = true, default-features = false, features = [
+  "fancy-regex",
+] }
 
 # Ambient-presence stack (desktop only): live in the tray, summon with a global
 # hotkey, optionally start at login. Excluded from mobile (iOS/Android) builds.

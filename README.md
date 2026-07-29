@@ -95,7 +95,7 @@ More in [docs: architecture](docs-site/src/content/docs/explanation/architecture
 
 ## Project status
 
-Released **v0.1.0** with all four hero features, plus voice output, a Jarvis-style HUD, a landing page, and a documentation site. Interface depth, local speech-to-text, and the autonomous work loop are next. See the [roadmap](ROADMAP.md).
+Released **v0.1.0** with all four hero features, plus a Jarvis-style HUD, a landing page, and a [documentation site](https://hotragn.github.io/H.O.T-Jarvis/docs/). Voice works both ways now: replies through your OS voices, and dictation through a local Whisper model that never uploads your audio (see [talk to Jarvis](https://hotragn.github.io/H.O.T-Jarvis/docs/how-to/talk-to-jarvis/)). It lives in the system tray with a global hotkey. Wake-word conversation and the autonomous work loop are next. See the [roadmap](ROADMAP.md).
 
 ## Contributing
 

@@ -235,6 +235,51 @@ export async function calibrationReport(): Promise<CalibrationReport | null> {
   return invoke<CalibrationReport>("calibration_report");
 }
 
+// --- Voice v1: on-device speech-to-text ---
+
+/// Mirrors core::stt::SttReadiness. `not_compiled` means the build has no local
+/// model, so the UI should say so rather than offer a dead button.
+export type SttReadiness =
+  | { state: "ready"; model: string }
+  | { state: "needs_download"; model: string; approx_mb: number }
+  | { state: "not_compiled" };
+
+export async function sttStatus(): Promise<SttReadiness> {
+  if (!inTauri) return { state: "not_compiled" };
+  return invoke<SttReadiness>("stt_status");
+}
+
+export async function sttDevice(): Promise<string | null> {
+  if (!inTauri) return null;
+  return invoke<string | null>("stt_device");
+}
+
+export async function sttDownloadModel(): Promise<string> {
+  if (!inTauri) throw new Error("No backend in the browser preview.");
+  return invoke<string>("stt_download_model");
+}
+
+export interface SttFormat {
+  sample_rate: number;
+  channels: number;
+}
+
+export async function sttStart(): Promise<SttFormat> {
+  if (!inTauri) throw new Error("No backend in the browser preview.");
+  return invoke<SttFormat>("stt_start");
+}
+
+/// Returns the transcript, or an empty string when nothing usable was said.
+export async function sttStop(): Promise<string> {
+  if (!inTauri) throw new Error("No backend in the browser preview.");
+  return invoke<string>("stt_stop");
+}
+
+export async function sttCancel(): Promise<void> {
+  if (!inTauri) return;
+  return invoke<void>("stt_cancel");
+}
+
 export async function exportMemory(): Promise<unknown> {
   if (!inTauri) throw new Error("No backend in the browser preview.");
   return invoke<unknown>("export_memory");

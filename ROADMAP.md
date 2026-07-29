@@ -40,7 +40,8 @@ Machine-readable task queue. Status: `ready` | `in-progress` | `done` | `blocked
 - [x] `done` Animated view transitions: keyed per-tab enter animation (the core stays as the persistent shared element), reduced-motion guarded
 - [x] `done` Shared-element morph between views (FLIP): one accent bar glides + scales under the active tab on every switch, done with transform only (translateX + scaleX off a 1px base) so it's GPU-cheap and layout-free; snaps on first paint and resize, reduced-motion guarded
 - [x] `done` Voice v0: spoken replies via OS voices (free, offline), voice toggle, barge-in, speaking/listening core states, push-to-talk where the platform provides recognition, honest fallback where it doesn't
-- [ ] `ready` Voice v1: fully local STT (Whisper on-device) so voice input works inside WebView2; then wake word + VAD + continuous conversation
+- [x] `done` Voice v1: fully local STT so voice input works inside WebView2 — mic captured in Rust (cpal), conditioned in `core::audio` (mono/16 kHz/trim/normalize, energy VAD + endpointer), transcribed by quantized Whisper via candle (pure Rust, no cmake/clang). Opt-in `local-whisper` feature, one-time ~43 MB model fetch, mel filterbank vendored. Honest routing: local is preferred over the WebView recognizer because that one uploads audio.
+- [ ] `ready` Voice v2: wake word + continuous conversation on top of the existing endpointer; hands-free mode that never needs a click
 - [x] `done` System tray + global hotkey + launch-at-login: tray icon with show / start-at-login toggle / quit, left-click toggles the window, closing hides to tray, global Ctrl+Shift+J summons it from anywhere; desktop-only, mobile build unaffected (§6.5)
 
 ## M3 — Autonomy
