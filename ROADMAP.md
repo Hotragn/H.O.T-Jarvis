@@ -40,7 +40,7 @@ Machine-readable task queue. Status: `ready` | `in-progress` | `done` | `blocked
 - [ ] `ready` Shared-element morph between views (FLIP) as a richer follow-up
 - [x] `done` Voice v0: spoken replies via OS voices (free, offline), voice toggle, barge-in, speaking/listening core states, push-to-talk where the platform provides recognition, honest fallback where it doesn't
 - [ ] `ready` Voice v1: fully local STT (Whisper on-device) so voice input works inside WebView2; then wake word + VAD + continuous conversation
-- [ ] `ready` System tray + global hotkey + launch-at-login
+- [x] `done` System tray + global hotkey + launch-at-login: tray icon with show / start-at-login toggle / quit, left-click toggles the window, closing hides to tray, global Ctrl+Shift+J summons it from anywhere; desktop-only, mobile build unaffected (§6.5)
 
 ## M3 — Autonomy
 
@@ -61,8 +61,8 @@ Groundwork planned in [docs/ios/README.md](docs/ios/README.md). Build/submit nee
 
 - [x] `done` Premium landing page (standalone static site, `landing/`): live-canvas hero, four feature showcases, narrative design, performance-correct lazy video plumbing, designed posters in every slot. ~28 KB video-free baseline.
 - [x] `done` Flagship cinematic ("a skill is born") rendered free via HyperFrames (HTML→MP4), 1080p/12s, wired into the hero slot.
-- [ ] `ready` Render the remaining loops (hero ambient, memory, confidence, undo) the same way — HyperFrames per `landing/assets/ASSETS.md`.
-- [ ] `ready` Deploy the landing page (GitHub Pages from `landing/`).
+- [x] `done` Render the remaining loops (hero ambient, memory, confidence, undo) via HyperFrames — all five 1080p clips live in every slot.
+- [x] `done` Deploy the site to GitHub Pages: landing at the root, Astro docs built under `/docs` in one `deploy-pages.yml` deploy. Pages enabled (Source = GitHub Actions). Landing https://hotragn.github.io/H.O.T-Jarvis/ · docs https://hotragn.github.io/H.O.T-Jarvis/docs/
 - [ ] `ready` README GIF / hero — the 10-second screen recording (needs owner or screen capture).
 
 ## Chores
