@@ -982,6 +982,12 @@ body {
   overflow-wrap: break-word;
 }
 
+/* Corroboration is the strongest survival signal, so it earns the accent. */
+.reflect-evidence {
+  color: var(--accent-2);
+  opacity: 0.95;
+}
+
 .reflect-source {
   margin: 0;
   font-family: var(--font-mono);

@@ -27,7 +27,8 @@ Machine-readable task queue. Status: `ready` | `in-progress` | `done` | `blocked
 - [x] `done` Replay & undo v1: undo for chat/notes/skills with inverse state captured at write time; revert-style skill rollbacks; deterministic replay audit (log vs. database drift report); undo buttons + audit in the timeline (§5.4)
 - [ ] `ready` Replay v2: step-through session player; undo for more kinds; audit covers notes/skills state too
 - [x] `done` Reflection pass v0: event-log digest → distilled lessons stored as insights, injected into chat + authoring prompts; manual "Reflect now" + auto-trigger every 20 messages (§5.2)
-- [ ] `ready` Reflection v1: insight scoring/decay + selective forgetting (the open problem)
+- [x] `done` Reflection v1: insight scoring, decay, and selective forgetting — per-kind half-lives (a `user` preference outlives a `provider` observation by 12x), corroboration when a later pass re-derives a lesson, use counts, a protection window for new lessons, duplicate merging, and a capacity cap. Prompt injection is now scored rather than "most recent N", and every forget is logged with its reason so it stays auditable.
+- [ ] `ready` Reflection v2: replace token-overlap duplicate detection with local embeddings once a model is already on disk (Voice v1 proved the download flow); surface a "forgotten" tab so drops are reversible from the UI
 
 ## M2 — Interface & voice
 
@@ -74,6 +75,5 @@ Groundwork planned in [docs/ios/README.md](docs/ios/README.md). Build/submit nee
 
 ## Backlog / open problems
 
-- Selective forgetting in memory (differentiator, hard)
 - Cross-platform build matrix + auto-update flow on release tags
 - Optional Obsidian-vault connector (one skill, never a requirement)

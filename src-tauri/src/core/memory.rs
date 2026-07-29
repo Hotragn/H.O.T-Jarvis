@@ -33,6 +33,10 @@ pub struct Insight {
     pub content: String,
     pub source: String,
     pub created_at: i64,
+    /// Times a later reflection re-derived this same lesson (Reflection v1).
+    pub corroborations: u32,
+    /// Times it has been injected into a prompt.
+    pub uses: u32,
 }
 
 pub struct MemoryStore {
@@ -99,6 +103,16 @@ impl MemoryStore {
                      created_at INTEGER NOT NULL
                  );
                  INSERT INTO schema_version (version) VALUES (2);",
+            )?;
+        }
+        if current < 3 {
+            // Reflection v1 bookkeeping: what a lesson has earned, so scoring
+            // and selective forgetting have something to work from. Additive
+            // with defaults, so existing insights keep working untouched.
+            conn.execute_batch(
+                "ALTER TABLE insights ADD COLUMN corroborations INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE insights ADD COLUMN uses INTEGER NOT NULL DEFAULT 0;
+                 INSERT INTO schema_version (version) VALUES (3);",
             )?;
         }
         Ok(())
@@ -170,10 +184,38 @@ impl MemoryStore {
         Ok(self.conn.last_insert_rowid())
     }
 
+    /// Credits a lesson for being independently re-derived (Reflection v1).
+    pub fn corroborate_insight(&self, id: i64) -> Result<(), MemoryError> {
+        self.conn.execute(
+            "UPDATE insights SET corroborations = corroborations + 1 WHERE id = ?1",
+            params![id],
+        )?;
+        Ok(())
+    }
+
+    /// Records that these lessons were used in a prompt, which feeds scoring.
+    pub fn mark_insights_used(&self, ids: &[i64]) -> Result<(), MemoryError> {
+        for id in ids {
+            self.conn.execute(
+                "UPDATE insights SET uses = uses + 1 WHERE id = ?1",
+                params![id],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Forgets a lesson. Selective forgetting is the point of Reflection v1;
+    /// the caller logs what went and why, so it stays auditable.
+    pub fn forget_insight(&self, id: i64) -> Result<(), MemoryError> {
+        self.conn
+            .execute("DELETE FROM insights WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
     /// Newest lessons first — the freshest experience matters most.
     pub fn recent_insights(&self, limit: usize) -> Result<Vec<Insight>, MemoryError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, kind, content, source, created_at FROM insights
+            "SELECT id, kind, content, source, created_at, corroborations, uses FROM insights
              ORDER BY id DESC LIMIT ?1",
         )?;
         let rows: Vec<Insight> = stmt
@@ -184,6 +226,8 @@ impl MemoryStore {
                     content: r.get(2)?,
                     source: r.get(3)?,
                     created_at: r.get(4)?,
+                    corroborations: r.get(5)?,
+                    uses: r.get(6)?,
                 })
             })?
             .collect::<Result<_, _>>()?;
@@ -285,8 +329,10 @@ mod tests {
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
                 .unwrap();
-            assert_eq!(version, 2, "schema is at the current version");
-            assert_eq!(rows, 2, "one row per migration step, never re-run");
+            // Bump both when a migration is added: v3 adds the Reflection v1
+            // scoring columns.
+            assert_eq!(version, 3, "schema is at the current version");
+            assert_eq!(rows, 3, "one row per migration step, never re-run");
         }
     }
 
@@ -349,6 +395,74 @@ mod tests {
         assert_eq!(recent.len(), 2);
         assert_eq!(recent[0].content, "avoid ${} in rhai", "newest first");
         assert_eq!(recent[1].kind, "provider");
+        // Reflection v1 bookkeeping starts at zero.
+        assert_eq!(recent[0].corroborations, 0);
+        assert_eq!(recent[0].uses, 0);
+    }
+
+    #[test]
+    fn insight_scoring_bookkeeping_accumulates_and_forgetting_removes() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::open(&dir.path().join("m.sqlite3")).unwrap();
+        let keep = store
+            .add_insight("user", "prefers short answers", "e1")
+            .unwrap();
+        let drop = store
+            .add_insight("provider", "groq was slow", "e2")
+            .unwrap();
+
+        store.corroborate_insight(keep).unwrap();
+        store.corroborate_insight(keep).unwrap();
+        store.mark_insights_used(&[keep, drop]).unwrap();
+
+        let all = store.recent_insights(10).unwrap();
+        let kept = all.iter().find(|i| i.id == keep).unwrap();
+        assert_eq!(kept.corroborations, 2, "corroborations should accumulate");
+        assert_eq!(kept.uses, 1);
+
+        store.forget_insight(drop).unwrap();
+        let after = store.recent_insights(10).unwrap();
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].id, keep, "only the forgotten one should be gone");
+    }
+
+    #[test]
+    fn a_v2_database_gains_the_scoring_columns_without_losing_insights() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("legacy.sqlite3");
+        // Build a store at v2 exactly as the previous release left it.
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE schema_version (version INTEGER NOT NULL);
+                 CREATE TABLE insights (
+                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                     kind TEXT NOT NULL,
+                     content TEXT NOT NULL,
+                     source TEXT NOT NULL DEFAULT '',
+                     created_at INTEGER NOT NULL
+                 );
+                 INSERT INTO insights (kind, content, source, created_at)
+                     VALUES ('user', 'an older lesson', 'e1', 1700000000);
+                 INSERT INTO schema_version (version) VALUES (1);
+                 INSERT INTO schema_version (version) VALUES (2);",
+            )
+            .unwrap();
+        }
+        // Opening it applies v3.
+        let store = MemoryStore::open(&path).unwrap();
+        let all = store.recent_insights(10).unwrap();
+        assert_eq!(
+            all.len(),
+            1,
+            "the existing lesson must survive the migration"
+        );
+        assert_eq!(all[0].content, "an older lesson");
+        assert_eq!(all[0].corroborations, 0, "new columns default to zero");
+        assert_eq!(all[0].uses, 0);
+        // And the new bookkeeping works on the migrated row.
+        store.corroborate_insight(all[0].id).unwrap();
+        assert_eq!(store.recent_insights(10).unwrap()[0].corroborations, 1);
     }
 
     #[test]

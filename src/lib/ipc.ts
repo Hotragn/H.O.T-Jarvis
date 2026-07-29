@@ -185,6 +185,29 @@ export interface Insight {
   content: string;
   source: string;
   created_at: number;
+  /// Times a later reflection re-derived this lesson (Reflection v1).
+  corroborations: number;
+  /// Times it has been injected into a prompt.
+  uses: number;
+}
+
+export interface ForgetMerge {
+  keep_id: number;
+  drop_id: number;
+  similarity: number;
+}
+
+/// What a maintenance pass did: duplicates collapsed, spent lessons dropped.
+export interface ForgetPlan {
+  merges: ForgetMerge[];
+  forget: number[];
+  reasons: [number, string][];
+  kept: number;
+}
+
+export async function maintainInsights(): Promise<ForgetPlan | null> {
+  if (!inTauri) return null;
+  return invoke<ForgetPlan>("maintain_insights");
 }
 
 export async function listInsights(limit = 50): Promise<Insight[]> {
