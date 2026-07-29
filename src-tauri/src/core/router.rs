@@ -33,6 +33,10 @@ pub struct ChatReply {
     /// the UI needs it to grade the answer later (calibration, §5.3).
     #[serde(default)]
     pub msg_id: Option<i64>,
+    /// Confidence v2: the stated number re-read through the measured
+    /// calibration record. None until an answer carries a confidence.
+    #[serde(default)]
+    pub trust: Option<crate::core::confidence::Trust>,
 }
 
 /// Provider-call failure with enough structure to drive backoff decisions.
@@ -147,6 +151,34 @@ fn ollama_body(model: &str, messages: &[ChatMessage]) -> serde_json::Value {
 
 fn openai_body(model: &str, messages: &[ChatMessage]) -> serde_json::Value {
     serde_json::json!({ "model": model, "messages": messages })
+}
+
+/// Ollama structured output: `format` takes a JSON schema and constrains
+/// decoding to match it. The model then physically cannot emit prose or a
+/// missing key, which is a different guarantee from asking it nicely.
+fn ollama_body_structured(
+    model: &str,
+    messages: &[ChatMessage],
+    schema: &serde_json::Value,
+) -> serde_json::Value {
+    serde_json::json!({
+        "model": model,
+        "messages": messages,
+        "stream": false,
+        "format": schema,
+    })
+}
+
+/// The OpenAI-compatible equivalent. Groq and OpenRouter accept
+/// `response_format: {type: "json_object"}` — weaker than a full schema (it
+/// guarantees valid JSON, not the right keys), but it still removes fences and
+/// prose, and the parser already validates the shape.
+fn openai_body_json(model: &str, messages: &[ChatMessage]) -> serde_json::Value {
+    serde_json::json!({
+        "model": model,
+        "messages": messages,
+        "response_format": { "type": "json_object" },
+    })
 }
 
 fn extract_ollama_content(v: &serde_json::Value) -> Option<String> {
@@ -282,17 +314,40 @@ impl Router {
     }
 
     pub async fn chat(&self, messages: &[ChatMessage]) -> Result<ChatReply, RouterError> {
+        self.chat_inner(messages, None).await
+    }
+
+    /// Like `chat`, but constrains the reply to a JSON schema where the provider
+    /// supports it (Ollama `format`, OpenAI-compatible `response_format`).
+    ///
+    /// Not cached: a structured and an unstructured reply to identical messages
+    /// are different things, and the cache is keyed on the messages alone.
+    pub async fn chat_json(
+        &self,
+        messages: &[ChatMessage],
+        schema: &serde_json::Value,
+    ) -> Result<ChatReply, RouterError> {
+        self.chat_inner(messages, Some(schema)).await
+    }
+
+    async fn chat_inner(
+        &self,
+        messages: &[ChatMessage],
+        schema: Option<&serde_json::Value>,
+    ) -> Result<ChatReply, RouterError> {
         // One snapshot per request; the std lock must never be held across await.
         let cfg = self.config();
         let key = cache_key(&serde_json::to_string(messages).unwrap_or_default());
-        if let Some(mut hit) = self
-            .cache
-            .lock()
-            .ok()
-            .and_then(|mut cache| cache.get(key, Instant::now()))
-        {
-            hit.cached = true;
-            return Ok(hit);
+        if schema.is_none() {
+            if let Some(mut hit) = self
+                .cache
+                .lock()
+                .ok()
+                .and_then(|mut cache| cache.get(key, Instant::now()))
+            {
+                hit.cached = true;
+                return Ok(hit);
+            }
         }
 
         let mut failures: Vec<String> = Vec::new();
@@ -311,7 +366,7 @@ impl Router {
                 }
             }
             let result = match provider {
-                ProviderId::Ollama => self.chat_ollama(&cfg, messages).await,
+                ProviderId::Ollama => self.chat_ollama(&cfg, messages, schema).await,
                 ProviderId::Groq => {
                     self.chat_openai_compatible(
                         "https://api.groq.com/openai/v1/chat/completions",
@@ -319,6 +374,7 @@ impl Router {
                         &cfg.groq_model,
                         ProviderId::Groq,
                         messages,
+                        schema,
                     )
                     .await
                 }
@@ -329,6 +385,7 @@ impl Router {
                         &cfg.openrouter_model,
                         ProviderId::OpenRouter,
                         messages,
+                        schema,
                     )
                     .await
                 }
@@ -338,8 +395,10 @@ impl Router {
                     if let Ok(mut cooldowns) = self.cooldowns.lock() {
                         cooldowns.reset(provider.name());
                     }
-                    if let Ok(mut cache) = self.cache.lock() {
-                        cache.put(key, reply.clone(), Instant::now());
+                    if schema.is_none() {
+                        if let Ok(mut cache) = self.cache.lock() {
+                            cache.put(key, reply.clone(), Instant::now());
+                        }
                     }
                     return Ok(reply);
                 }
@@ -377,13 +436,17 @@ impl Router {
         &self,
         cfg: &RouterConfig,
         messages: &[ChatMessage],
+        schema: Option<&serde_json::Value>,
     ) -> Result<ChatReply, CallError> {
         let url = format!("{}/api/chat", cfg.ollama_base_url.trim_end_matches('/'));
         let resp = self
             .client
             .post(&url)
             .timeout(Duration::from_secs(180))
-            .json(&ollama_body(&cfg.ollama_model, messages))
+            .json(&match schema {
+                Some(schema) => ollama_body_structured(&cfg.ollama_model, messages, schema),
+                None => ollama_body(&cfg.ollama_model, messages),
+            })
             .send()
             .await
             .map_err(|e| CallError::Other(format!("request failed: {e}")))?;
@@ -409,6 +472,7 @@ impl Router {
             cached: false,
             confidence: None,
             msg_id: None,
+            trust: None,
         })
     }
 
@@ -419,13 +483,18 @@ impl Router {
         model: &str,
         provider: ProviderId,
         messages: &[ChatMessage],
+        schema: Option<&serde_json::Value>,
     ) -> Result<ChatReply, CallError> {
         let resp = self
             .client
             .post(url)
             .timeout(Duration::from_secs(120))
             .bearer_auth(api_key)
-            .json(&openai_body(model, messages))
+            .json(&match schema {
+                // Schema-level constraint isn't portable here; JSON mode is.
+                Some(_) => openai_body_json(model, messages),
+                None => openai_body(model, messages),
+            })
             .send()
             .await
             .map_err(|e| CallError::Other(format!("request failed: {e}")))?;
@@ -451,6 +520,7 @@ impl Router {
             cached: false,
             confidence: None,
             msg_id: None,
+            trust: None,
         })
     }
 }
@@ -563,6 +633,24 @@ Connection: close
     }
 
     #[test]
+    fn structured_ollama_body_carries_the_schema_in_format() {
+        let schema = crate::core::authoring::skill_schema();
+        let body = ollama_body_structured("llama3.2", &msgs(), &schema);
+        assert_eq!(body["format"], schema, "format must be the schema itself");
+        assert_eq!(body["stream"], false);
+        assert_eq!(body["model"], "llama3.2");
+        // Plain bodies must stay schema-free, or every chat turn gets constrained.
+        assert!(ollama_body("llama3.2", &msgs()).get("format").is_none());
+    }
+
+    #[test]
+    fn structured_openai_body_uses_json_mode() {
+        let body = openai_body_json("m", &msgs());
+        assert_eq!(body["response_format"]["type"], "json_object");
+        assert!(openai_body("m", &msgs()).get("response_format").is_none());
+    }
+
+    #[test]
     fn ollama_body_disables_streaming_and_keeps_messages() {
         let body = ollama_body("llama3.2", &msgs());
         assert_eq!(body["stream"], false);
@@ -616,6 +704,7 @@ Connection: close
                 cached: false,
                 confidence: None,
                 msg_id: None,
+                trust: None,
             },
             Instant::now(),
         );

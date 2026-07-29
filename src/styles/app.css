@@ -1134,6 +1134,27 @@ body {
   background: var(--warn);
 }
 
+/* Confidence v2: a calibrated demotion is a real caution, so it gets the warn
+   token rather than the quiet meta styling. */
+.msg-warning {
+  display: block;
+  margin-top: 6px;
+  padding-left: 8px;
+  border-left: 2px solid var(--warn);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--warn);
+}
+
+/* Tone the reply's left edge by its calibrated confidence. */
+.msg[data-role="assistant"][data-tone="low"] {
+  border-left-color: var(--warn);
+}
+
+.msg[data-role="assistant"][data-tone="high"] {
+  border-left-color: var(--accent-2);
+}
+
 /* --- reply rating (feeds calibration) --- */
 .rate-row {
   display: flex;

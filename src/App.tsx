@@ -20,7 +20,7 @@ import {
   type Status,
   type Telemetry,
 } from "./lib/ipc";
-import { confidenceLabel } from "./lib/confidence";
+import { trustLabel, trustTone, trustWarning } from "./lib/confidence";
 import { describeStatus } from "./lib/status";
 import { platform, showSystemTelemetry } from "./lib/platform";
 import {
@@ -53,6 +53,9 @@ interface ChatItem {
   meta?: string;
   /// Set on assistant replies so the answer can be graded (calibration, §5.3).
   msgId?: number | null;
+  /// Confidence v2: shown when calibration demoted a confident-looking answer.
+  warning?: string | null;
+  tone?: "high" | "mid" | "low" | null;
 }
 
 type Tab = "chat" | "skills" | "notes" | "memory" | "events" | "reflections" | "settings";
@@ -400,7 +403,9 @@ export default function App() {
           onend: () => setSpeaking(false),
         });
       }
-      const conf = confidenceLabel(reply.confidence);
+      // Confidence v2: label by the calibrated value, and warn when the record
+      // says a confident-looking answer is really a guess.
+      const conf = trustLabel(reply.trust) ?? null;
       setItems((prev) => [
         ...prev,
         {
@@ -409,6 +414,8 @@ export default function App() {
           content: reply.content,
           meta: `${reply.provider} · ${reply.model}${reply.cached ? " · cached" : ""}${conf ? ` · ${conf}` : ""}`,
           msgId: reply.msg_id,
+          warning: trustWarning(reply.trust),
+          tone: trustTone(reply.trust),
         },
       ]);
       getStatus().then(setStatus).catch(() => {});
@@ -570,9 +577,19 @@ export default function App() {
                 </div>
               )}
               {items.map((item) => (
-                <div key={item.key} className="msg" data-role={item.role}>
+                <div
+                  key={item.key}
+                  className="msg"
+                  data-role={item.role}
+                  data-tone={item.tone ?? undefined}
+                >
                   {item.content}
                   {item.meta && <span className="msg-meta">{item.meta}</span>}
+                  {item.warning && (
+                    <span className="msg-warning" role="note">
+                      {item.warning}
+                    </span>
+                  )}
                   {/* Grading a reply is what turns the self-rating into a
                       measurable track record (§5.3). */}
                   {item.role === "assistant" && typeof item.msgId === "number" && (

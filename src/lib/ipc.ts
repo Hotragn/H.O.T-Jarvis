@@ -33,6 +33,19 @@ export interface ChatReply {
   confidence: number | null;
   /// Row id of the stored reply; needed to grade it (calibration).
   msg_id: number | null;
+  /// Confidence v2: the stated number re-read through the calibration record.
+  trust: Trust | null;
+}
+
+/// How much an answer is actually worth, after applying measured bias.
+export interface Trust {
+  raw: number;
+  adjusted: number;
+  /// Calibrated confidence is below the ask threshold.
+  verify: boolean;
+  /// The raw number would have passed but the calibrated one didn't — the
+  /// case worth explaining to the user.
+  demoted: boolean;
 }
 
 export interface Telemetry {
