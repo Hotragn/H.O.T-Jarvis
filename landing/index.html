@@ -33,6 +33,9 @@
         <img class="poster" src="assets/posters/hero-ambient.svg" alt="" />
       </div>
 
+      <!-- GPU core (raymarched). Takes over only if WebGL2 actually renders a
+           frame; otherwise the 2D canvas below stays as the baseline. -->
+      <canvas id="hero-webgl" class="hero-webgl" aria-hidden="true"></canvas>
       <canvas id="hero-core" class="hero-core" aria-hidden="true"></canvas>
 
       <div class="hero-copy">
@@ -186,6 +189,7 @@
     </footer>
 
     <script type="module" src="core.js"></script>
+    <script type="module" src="webgl-core.js"></script>
     <script type="module" src="reveal.js"></script>
   </body>
 </html>

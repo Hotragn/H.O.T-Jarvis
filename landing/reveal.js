@@ -4,9 +4,19 @@
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 // ---- scroll reveals ----
+// Fail-safe by construction. `.reveal` starts at opacity 0, so anything that
+// stops the observer from firing leaves content permanently invisible — the
+// worst possible failure for a landing page, and one that can happen for
+// reasons outside our control (a threshold that a very tall element can't
+// satisfy, a background/throttled tab at load, an observer that never gets a
+// first callback). So: reveal immediately where we can, and keep a timer that
+// unconditionally shows everything. Content being visible always wins over
+// content animating in.
 const revealables = document.querySelectorAll(".reveal");
+const revealAll = () => revealables.forEach((el) => el.classList.add("in"));
+
 if (reduceMotion || !("IntersectionObserver" in window)) {
-  revealables.forEach((el) => el.classList.add("in"));
+  revealAll();
 } else {
   const revealer = new IntersectionObserver(
     (entries) => {
@@ -17,9 +27,25 @@ if (reduceMotion || !("IntersectionObserver" in window)) {
         }
       }
     },
-    { rootMargin: "0px 0px -12% 0px", threshold: 0.15 },
+    // No threshold: any pixel of overlap counts. A percentage threshold can be
+    // unsatisfiable when the element is much taller than the viewport.
+    { rootMargin: "0px 0px -8% 0px", threshold: 0 },
   );
   revealables.forEach((el) => revealer.observe(el));
+
+  // Anything already on screen at load shows without waiting for a callback.
+  const showIfInView = () => {
+    for (const el of revealables) {
+      const r = el.getBoundingClientRect();
+      if (r.top < window.innerHeight && r.bottom > 0) el.classList.add("in");
+    }
+  };
+  showIfInView();
+  window.addEventListener("load", showIfInView, { once: true });
+
+  // Last resort: if the observer hasn't done its job in a few seconds, stop
+  // hiding the page. Better a missing animation than a blank section.
+  window.setTimeout(revealAll, 4000);
 }
 
 // ---- lazy video ----

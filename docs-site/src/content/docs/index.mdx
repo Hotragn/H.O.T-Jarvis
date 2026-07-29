@@ -8,7 +8,9 @@ hero:
     file: ../../assets/logo.svg
   actions:
     - text: Get started
-      link: /tutorials/quickstart/
+      # Relative on purpose: hero action links bypass the rehype base rewrite,
+      # and a root-absolute path would 404 under the /docs subpath.
+      link: tutorials/quickstart/
       icon: right-arrow
       variant: primary
     - text: View on GitHub
@@ -60,10 +62,10 @@ npm run tauri dev          # 3. launch the desktop app
 ```
 
 <CardGrid stagger>
-  <LinkCard title="Quickstart" href="/tutorials/quickstart/" description="Install, run, and have your first conversation that survives a restart." />
-  <LinkCard title="Author your first skill" href="/tutorials/your-first-skill/" description="Ask Jarvis to build a skill and watch it self-test." />
-  <LinkCard title="Architecture" href="/explanation/architecture/" description="How the router, memory, and skill engine fit together." />
-  <LinkCard title="Tauri command reference" href="/reference/tauri-commands/" description="Every IPC command, with arguments and return shapes." />
+  <LinkCard title="Quickstart" href="tutorials/quickstart/" description="Install, run, and have your first conversation that survives a restart." />
+  <LinkCard title="Author your first skill" href="tutorials/your-first-skill/" description="Ask Jarvis to build a skill and watch it self-test." />
+  <LinkCard title="Architecture" href="explanation/architecture/" description="How the router, memory, and skill engine fit together." />
+  <LinkCard title="Tauri command reference" href="reference/tauri-commands/" description="Every IPC command, with arguments and return shapes." />
 </CardGrid>
 
 ## Built with
