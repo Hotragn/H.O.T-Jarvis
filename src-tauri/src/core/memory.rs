@@ -115,6 +115,20 @@ impl MemoryStore {
                  INSERT INTO schema_version (version) VALUES (3);",
             )?;
         }
+        if current < 4 {
+            // Semantic recall: one embedding per message, stored as an LE f32
+            // BLOB. Keyed by message id; the model column exists so vectors
+            // from different embedding models are never compared to each other.
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS embeddings (
+                     message_id INTEGER PRIMARY KEY,
+                     model      TEXT NOT NULL,
+                     vector     BLOB NOT NULL,
+                     created_at INTEGER NOT NULL
+                 );
+                 INSERT INTO schema_version (version) VALUES (4);",
+            )?;
+        }
         Ok(())
     }
 
@@ -210,6 +224,91 @@ impl MemoryStore {
         self.conn
             .execute("DELETE FROM insights WHERE id = ?1", params![id])?;
         Ok(())
+    }
+
+    /// Stores (or replaces) the embedding for a message. Replacing matters:
+    /// re-indexing with a different model must overwrite, never duplicate.
+    pub fn upsert_embedding(
+        &self,
+        message_id: i64,
+        model: &str,
+        vector: &[f32],
+    ) -> Result<(), MemoryError> {
+        self.conn.execute(
+            "INSERT INTO embeddings (message_id, model, vector, created_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(message_id) DO UPDATE SET model = ?2, vector = ?3, created_at = ?4",
+            params![
+                message_id,
+                model,
+                crate::core::embedding::to_bytes(vector),
+                now_unix()
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Every stored vector for one model. Vectors written by other models are
+    /// skipped, not compared: cross-model cosine is meaningless.
+    pub fn embeddings_for_model(&self, model: &str) -> Result<Vec<(i64, Vec<f32>)>, MemoryError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT message_id, vector FROM embeddings WHERE model = ?1")?;
+        let rows: Vec<(i64, Vec<u8>)> = stmt
+            .query_map(params![model], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|(id, blob)| crate::core::embedding::from_bytes(&blob).map(|v| (id, v)))
+            .collect())
+    }
+
+    /// Message ids that have no embedding yet — the backfill work list.
+    pub fn unembedded_message_ids(&self, limit: usize) -> Result<Vec<i64>, MemoryError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT m.id FROM messages m
+             LEFT JOIN embeddings e ON e.message_id = m.id
+             WHERE e.message_id IS NULL
+             ORDER BY m.id DESC LIMIT ?1",
+        )?;
+        let rows: Vec<i64> = stmt
+            .query_map(params![limit as i64], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+        Ok(rows)
+    }
+
+    /// Fetches specific messages by id (recall hits), in the order given.
+    pub fn messages_by_ids(&self, ids: &[i64]) -> Result<Vec<StoredMessage>, MemoryError> {
+        let mut out = Vec::with_capacity(ids.len());
+        for id in ids {
+            let row = self
+                .conn
+                .query_row(
+                    "SELECT id, role, content, created_at FROM messages WHERE id = ?1",
+                    params![id],
+                    |r| {
+                        Ok(StoredMessage {
+                            id: r.get(0)?,
+                            role: r.get(1)?,
+                            content: r.get(2)?,
+                            created_at: r.get(3)?,
+                        })
+                    },
+                )
+                .optional()?;
+            if let Some(m) = row {
+                out.push(m);
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn embedding_count(&self) -> Result<u64, MemoryError> {
+        Ok(self
+            .conn
+            .query_row("SELECT COUNT(*) FROM embeddings", [], |r| {
+                r.get::<_, i64>(0)
+            })? as u64)
     }
 
     /// Newest lessons first — the freshest experience matters most.
@@ -329,10 +428,9 @@ mod tests {
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
                 .unwrap();
-            // Bump both when a migration is added: v3 adds the Reflection v1
-            // scoring columns.
-            assert_eq!(version, 3, "schema is at the current version");
-            assert_eq!(rows, 3, "one row per migration step, never re-run");
+            // Bump both when a migration is added: v4 adds the embeddings table.
+            assert_eq!(version, 4, "schema is at the current version");
+            assert_eq!(rows, 4, "one row per migration step, never re-run");
         }
     }
 
@@ -424,6 +522,67 @@ mod tests {
         let after = store.recent_insights(10).unwrap();
         assert_eq!(after.len(), 1);
         assert_eq!(after[0].id, keep, "only the forgotten one should be gone");
+    }
+
+    #[test]
+    fn embeddings_roundtrip_replace_and_report_coverage() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::open(&dir.path().join("m.sqlite3")).unwrap();
+        let a = store
+            .append_message("user", "the sky was clear last night")
+            .unwrap();
+        let b = store
+            .append_message("assistant", "good for the telescope")
+            .unwrap();
+
+        store
+            .upsert_embedding(a, "test-model", &[1.0, 0.0])
+            .unwrap();
+        store
+            .upsert_embedding(b, "test-model", &[0.0, 1.0])
+            .unwrap();
+        assert_eq!(store.embedding_count().unwrap(), 2);
+
+        let vecs = store.embeddings_for_model("test-model").unwrap();
+        assert_eq!(vecs.len(), 2);
+        assert!(vecs.iter().any(|(id, v)| *id == a && *v == vec![1.0, 0.0]));
+
+        // Replacement, not duplication — and other models don't cross-read.
+        store
+            .upsert_embedding(a, "other-model", &[0.5, 0.5])
+            .unwrap();
+        assert_eq!(
+            store.embedding_count().unwrap(),
+            2,
+            "upsert must not duplicate"
+        );
+        assert_eq!(store.embeddings_for_model("test-model").unwrap().len(), 1);
+        assert_eq!(store.embeddings_for_model("other-model").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn unembedded_backlog_shrinks_as_vectors_land() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::open(&dir.path().join("m.sqlite3")).unwrap();
+        let a = store.append_message("user", "one").unwrap();
+        let _b = store.append_message("user", "two").unwrap();
+        assert_eq!(store.unembedded_message_ids(10).unwrap().len(), 2);
+        store.upsert_embedding(a, "m", &[1.0]).unwrap();
+        let left = store.unembedded_message_ids(10).unwrap();
+        assert_eq!(left.len(), 1);
+        assert_ne!(left[0], a);
+    }
+
+    #[test]
+    fn messages_by_ids_preserves_request_order_and_skips_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::open(&dir.path().join("m.sqlite3")).unwrap();
+        let a = store.append_message("user", "first").unwrap();
+        let b = store.append_message("assistant", "second").unwrap();
+        let got = store.messages_by_ids(&[b, 9999, a]).unwrap();
+        assert_eq!(got.len(), 2, "missing ids are skipped");
+        assert_eq!(got[0].id, b, "order follows the request, not the table");
+        assert_eq!(got[1].id, a);
     }
 
     #[test]

@@ -2,10 +2,14 @@ import { useCallback, useEffect, useState } from "react";
 import {
   exportMemory,
   getHistory,
+  indexMemory,
+  inTauri,
   listInsights,
   reflectNow,
+  searchMemory,
   wipeMemory,
   type Insight,
+  type SearchHit,
   type StoredMessage,
 } from "../lib/ipc";
 
@@ -22,6 +26,10 @@ export default function MemoryView({ messageCount, factCount, onWiped }: Props) 
   const [insights, setInsights] = useState<Insight[]>([]);
   const [reflecting, setReflecting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<SearchHit[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [indexing, setIndexing] = useState(false);
 
   const refresh = useCallback(() => {
     getHistory(500)
@@ -33,6 +41,45 @@ export default function MemoryView({ messageCount, factCount, onWiped }: Props) 
   }, []);
 
   useEffect(refresh, [refresh]);
+
+  // Meaning-based search over the whole history — local embeddings, so this
+  // works offline and nothing leaves the machine.
+  const doSearch = async () => {
+    const q = query.trim();
+    if (!q || searching) return;
+    setSearching(true);
+    setNotice(null);
+    try {
+      setHits(await searchMemory(q, 10));
+    } catch (e) {
+      // Most common cause: the embedding model isn't pulled yet.
+      setNotice(String(e));
+      setHits(null);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  // Backfills embeddings for history from before semantic memory existed.
+  const doIndex = async () => {
+    if (indexing) return;
+    setIndexing(true);
+    setNotice(null);
+    try {
+      const [indexed, remaining] = await indexMemory();
+      setNotice(
+        remaining > 0
+          ? `Indexed ${indexed} messages; ${remaining} to go — click again to continue.`
+          : indexed > 0
+            ? `Indexed ${indexed} messages. Everything is searchable.`
+            : "Everything is already indexed.",
+      );
+    } catch (e) {
+      setNotice(String(e));
+    } finally {
+      setIndexing(false);
+    }
+  };
 
   const doExport = async () => {
     try {
@@ -103,10 +150,70 @@ export default function MemoryView({ messageCount, factCount, onWiped }: Props) 
         </span>
       </div>
 
+      <form
+        className="memory-search"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void doSearch();
+        }}
+      >
+        <input
+          className="chat-input"
+          value={query}
+          placeholder='Search by meaning — e.g. "that note about the telescope"'
+          aria-label="semantic memory search"
+          onChange={(e) => {
+            setQuery(e.target.value);
+            if (!e.target.value.trim()) setHits(null);
+          }}
+        />
+        <button type="submit" className="ghost-btn" disabled={searching || !inTauri || !query.trim()}>
+          {searching ? "Searching…" : "Search"}
+        </button>
+        <button
+          type="button"
+          className="ghost-btn"
+          disabled={indexing || !inTauri}
+          title="embed older history so it becomes searchable"
+          onClick={() => void doIndex()}
+        >
+          {indexing ? "Indexing…" : "Build index"}
+        </button>
+      </form>
+
       {notice && (
         <div className="msg" data-role="system">
           {notice}
         </div>
+      )}
+
+      {hits !== null && (
+        <>
+          <div className="panel-title-row">
+            <span className="panel-title">matches · {hits.length}</span>
+            <button type="button" className="ghost-btn" onClick={() => { setHits(null); setQuery(""); }}>
+              Clear
+            </button>
+          </div>
+          {hits.length === 0 ? (
+            <p className="panel-hint">
+              Nothing similar found. Recall works by meaning, so try describing
+              the moment rather than quoting it.
+            </p>
+          ) : (
+            <ul className="memory-list">
+              {hits.map((h) => (
+                <li key={h.id} className="memory-row" data-role={h.role}>
+                  <span className="memory-role">{Math.round(h.score * 100)}%</span>
+                  <span className="memory-text">{h.content}</span>
+                  <time className="memory-time">
+                    {new Date(h.created_at * 1000).toLocaleString()}
+                  </time>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       )}
 
       <div className="panel-title-row">
