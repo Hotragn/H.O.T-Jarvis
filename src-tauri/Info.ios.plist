@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged by Tauri into the generated iOS project's Info.plist.
+     Usage strings + export compliance, per docs/ios/README.md. -->
+<plist version="1.0">
+<dict>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>H.O.T-Jarvis uses the microphone for voice conversations, processed on your device.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>Speech is transcribed on your device to let you talk to the assistant.</string>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>H.O.T-Jarvis connects to your own computer on your local network so the assistant can think there, privately.</string>
+  <key>ITSAppUsesNonExemptEncryption</key>
+  <false/>
+</dict>
+</plist>

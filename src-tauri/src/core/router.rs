@@ -155,7 +155,10 @@ fn extract_openai_content(v: &serde_json::Value) -> Option<String> {
 }
 
 pub struct Router {
-    config: RouterConfig,
+    /// Behind a lock so the settings view can change providers/models at
+    /// runtime. Env vars seeded it, but iOS has no env vars and desktop users
+    /// shouldn't have to edit .env and restart — see set_config.
+    config: Mutex<RouterConfig>,
     client: reqwest::Client,
     cache: Mutex<ResponseCache<ChatReply>>,
     cooldowns: Mutex<CooldownTracker>,
@@ -168,25 +171,37 @@ impl Router {
             .build()
             .expect("failed to build http client");
         Self {
-            config,
+            config: Mutex::new(config),
             client,
             cache: Mutex::new(ResponseCache::new(CACHE_CAPACITY, CACHE_TTL)),
             cooldowns: Mutex::new(CooldownTracker::new()),
         }
     }
 
-    pub fn config(&self) -> &RouterConfig {
-        &self.config
+    /// A snapshot of the current configuration.
+    pub fn config(&self) -> RouterConfig {
+        self.config.lock().expect("router config lock").clone()
+    }
+
+    /// Applies a new configuration immediately. The response cache is dropped
+    /// with it: cached replies are keyed by message content only, and a reply
+    /// from the previous model must not be served as if the new one wrote it.
+    pub fn set_config(&self, config: RouterConfig) {
+        *self.config.lock().expect("router config lock") = config;
+        if let Ok(mut cache) = self.cache.lock() {
+            *cache = ResponseCache::new(CACHE_CAPACITY, CACHE_TTL);
+        }
     }
 
     /// Priority order for this request: local Ollama always first,
     /// cloud providers only when a key is present.
     pub fn provider_plan(&self) -> Vec<ProviderId> {
+        let cfg = self.config();
         let mut plan = vec![ProviderId::Ollama];
-        if self.config.groq_api_key.is_some() {
+        if cfg.groq_api_key.is_some() {
             plan.push(ProviderId::Groq);
         }
-        if self.config.openrouter_api_key.is_some() {
+        if cfg.openrouter_api_key.is_some() {
             plan.push(ProviderId::OpenRouter);
         }
         plan
@@ -199,7 +214,7 @@ impl Router {
     pub async fn ollama_reachable(&self) -> bool {
         let url = format!(
             "{}/api/tags",
-            self.config.ollama_base_url.trim_end_matches('/')
+            self.config().ollama_base_url.trim_end_matches('/')
         );
         match self
             .client
@@ -214,6 +229,8 @@ impl Router {
     }
 
     pub async fn chat(&self, messages: &[ChatMessage]) -> Result<ChatReply, RouterError> {
+        // One snapshot per request; the std lock must never be held across await.
+        let cfg = self.config();
         let key = cache_key(&serde_json::to_string(messages).unwrap_or_default());
         if let Some(mut hit) = self
             .cache
@@ -241,12 +258,12 @@ impl Router {
                 }
             }
             let result = match provider {
-                ProviderId::Ollama => self.chat_ollama(messages).await,
+                ProviderId::Ollama => self.chat_ollama(&cfg, messages).await,
                 ProviderId::Groq => {
                     self.chat_openai_compatible(
                         "https://api.groq.com/openai/v1/chat/completions",
-                        self.config.groq_api_key.as_deref().unwrap_or_default(),
-                        &self.config.groq_model,
+                        cfg.groq_api_key.as_deref().unwrap_or_default(),
+                        &cfg.groq_model,
                         ProviderId::Groq,
                         messages,
                     )
@@ -255,11 +272,8 @@ impl Router {
                 ProviderId::OpenRouter => {
                     self.chat_openai_compatible(
                         "https://openrouter.ai/api/v1/chat/completions",
-                        self.config
-                            .openrouter_api_key
-                            .as_deref()
-                            .unwrap_or_default(),
-                        &self.config.openrouter_model,
+                        cfg.openrouter_api_key.as_deref().unwrap_or_default(),
+                        &cfg.openrouter_model,
                         ProviderId::OpenRouter,
                         messages,
                     )
@@ -306,16 +320,17 @@ impl Router {
         }
     }
 
-    async fn chat_ollama(&self, messages: &[ChatMessage]) -> Result<ChatReply, CallError> {
-        let url = format!(
-            "{}/api/chat",
-            self.config.ollama_base_url.trim_end_matches('/')
-        );
+    async fn chat_ollama(
+        &self,
+        cfg: &RouterConfig,
+        messages: &[ChatMessage],
+    ) -> Result<ChatReply, CallError> {
+        let url = format!("{}/api/chat", cfg.ollama_base_url.trim_end_matches('/'));
         let resp = self
             .client
             .post(&url)
             .timeout(Duration::from_secs(180))
-            .json(&ollama_body(&self.config.ollama_model, messages))
+            .json(&ollama_body(&cfg.ollama_model, messages))
             .send()
             .await
             .map_err(|e| CallError::Other(format!("request failed: {e}")))?;
@@ -337,7 +352,7 @@ impl Router {
         Ok(ChatReply {
             content,
             provider: ProviderId::Ollama.name().into(),
-            model: self.config.ollama_model.clone(),
+            model: cfg.ollama_model.clone(),
             cached: false,
             confidence: None,
             msg_id: None,

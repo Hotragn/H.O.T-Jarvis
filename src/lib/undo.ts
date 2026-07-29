@@ -4,6 +4,7 @@ const REVERSIBLE = new Set([
   "chat.user",
   "chat.assistant",
   "note.saved",
+  "note.deleted",
   "skill.saved",
   "skill.authored",
 ]);

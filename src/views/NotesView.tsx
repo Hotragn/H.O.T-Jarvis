@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { listNotes, readNote, saveNote } from "../lib/ipc";
+import { deleteNote, listNotes, readNote, saveNote } from "../lib/ipc";
 
 // The notes tool's cockpit: list on the left, note body on the right.
 // Backed by the Rust NotesTool — files live inside the app data dir only.
@@ -28,6 +28,22 @@ export default function NotesView() {
       setError(null);
     } catch (e) {
       setBody("");
+      setError(String(e));
+    }
+  };
+
+  // Deletion is undoable: the backend captures the content first, so the
+  // timeline can restore it. That's why there's no scary confirm dialog.
+  const remove = async (name: string) => {
+    try {
+      await deleteNote(name);
+      if (selected === name) {
+        setSelected(null);
+        setBody("");
+      }
+      refresh();
+      setError(null);
+    } catch (e) {
       setError(String(e));
     }
   };
@@ -69,7 +85,7 @@ export default function NotesView() {
         )}
         <ul>
           {notes.map((name) => (
-            <li key={name}>
+            <li key={name} className="note-row">
               <button
                 type="button"
                 className="note-item"
@@ -77,6 +93,15 @@ export default function NotesView() {
                 onClick={() => void open(name)}
               >
                 {name}
+              </button>
+              <button
+                type="button"
+                className="ghost-btn danger note-delete"
+                title="delete this note (undoable from the event log)"
+                aria-label={`delete note ${name}`}
+                onClick={() => void remove(name)}
+              >
+                ✕
               </button>
             </li>
           ))}
