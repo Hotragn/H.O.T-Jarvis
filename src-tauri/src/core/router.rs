@@ -90,6 +90,9 @@ pub struct RouterConfig {
     pub groq_model: String,
     pub openrouter_api_key: Option<String>,
     pub openrouter_model: String,
+    /// Local embedding model for semantic recall. Embeddings never go to the
+    /// cloud providers — recall is local-only by design, or off.
+    pub ollama_embed_model: String,
 }
 
 impl Default for RouterConfig {
@@ -101,6 +104,7 @@ impl Default for RouterConfig {
             groq_model: "llama-3.3-70b-versatile".into(),
             openrouter_api_key: None,
             openrouter_model: "meta-llama/llama-3.3-70b-instruct:free".into(),
+            ollama_embed_model: "nomic-embed-text".into(),
         }
     }
 }
@@ -122,6 +126,7 @@ impl RouterConfig {
             groq_model: env_nonempty("GROQ_MODEL").unwrap_or(d.groq_model),
             openrouter_api_key: env_nonempty("OPENROUTER_API_KEY"),
             openrouter_model: env_nonempty("OPENROUTER_MODEL").unwrap_or(d.openrouter_model),
+            ollama_embed_model: env_nonempty("OLLAMA_EMBED_MODEL").unwrap_or(d.ollama_embed_model),
         }
     }
 }
@@ -226,6 +231,54 @@ impl Router {
             Ok(resp) => resp.status().is_success(),
             Err(_) => false,
         }
+    }
+
+    /// Embeds one text with the local embedding model. Local-only on purpose:
+    /// sending message history to a cloud embedder would quietly break the
+    /// privacy promise, so when Ollama can't do it, recall is simply off.
+    ///
+    /// Supports both Ollama embedding APIs: `/api/embed` (current, returns
+    /// `embeddings: [[..]]`) with a fallback parse for the legacy
+    /// `embedding: [..]` shape.
+    pub async fn embed(&self, text: &str) -> Result<Vec<f32>, String> {
+        let cfg = self.config();
+        let url = format!("{}/api/embed", cfg.ollama_base_url.trim_end_matches('/'));
+        let resp = self
+            .client
+            .post(&url)
+            .timeout(Duration::from_secs(30))
+            .json(&serde_json::json!({ "model": cfg.ollama_embed_model, "input": text }))
+            .send()
+            .await
+            .map_err(|e| format!("embedding request failed: {e}"))?;
+        if !resp.status().is_success() {
+            return Err(format!(
+                "embedding model '{}' unavailable (http {}) — `ollama pull {}` enables recall",
+                cfg.ollama_embed_model,
+                resp.status().as_u16(),
+                cfg.ollama_embed_model
+            ));
+        }
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("invalid embedding response: {e}"))?;
+        let vector = body["embeddings"][0]
+            .as_array()
+            .or_else(|| body["embedding"].as_array())
+            .ok_or("embedding response had no vector")?
+            .iter()
+            .filter_map(|v| v.as_f64().map(|f| f as f32))
+            .collect::<Vec<f32>>();
+        if vector.is_empty() {
+            return Err("embedding response was empty".into());
+        }
+        Ok(vector)
+    }
+
+    /// The embedding model currently configured (for storage namespacing).
+    pub fn embed_model(&self) -> String {
+        self.config().ollama_embed_model
     }
 
     pub async fn chat(&self, messages: &[ChatMessage]) -> Result<ChatReply, RouterError> {
@@ -418,6 +471,74 @@ mod tests {
             role: "user".into(),
             content: "hello".into(),
         }]
+    }
+
+    /// One-shot HTTP server that answers a single request with a canned body,
+    /// so Router::embed can be tested against real bytes on a real socket.
+    fn serve_once(status_line: &'static str, body: &'static str) -> String {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0u8; 4096];
+                let _ = stream.read(&mut buf);
+                let resp = format!(
+                    "HTTP/1.1 {status_line}
+Content-Type: application/json
+Content-Length: {}
+Connection: close
+
+{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(resp.as_bytes());
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    fn router_at(base: String) -> Router {
+        Router::new(RouterConfig {
+            ollama_base_url: base,
+            ..RouterConfig::default()
+        })
+    }
+
+    #[tokio::test]
+    async fn embed_parses_the_current_ollama_shape() {
+        let base = serve_once("200 OK", r#"{"embeddings": [[0.1, -0.5, 1.0]]}"#);
+        let v = router_at(base).embed("hello").await.unwrap();
+        assert_eq!(v, vec![0.1, -0.5, 1.0]);
+    }
+
+    #[tokio::test]
+    async fn embed_parses_the_legacy_ollama_shape() {
+        let base = serve_once("200 OK", r#"{"embedding": [1.0, 2.0]}"#);
+        let v = router_at(base).embed("hello").await.unwrap();
+        assert_eq!(v, vec![1.0, 2.0]);
+    }
+
+    #[tokio::test]
+    async fn embed_reports_an_unsupported_server_honestly() {
+        // Observed live: some builds answer 501 "does not support embeddings".
+        let base = serve_once(
+            "501 Not Implemented",
+            r#"{"error":"This server does not support embeddings."}"#,
+        );
+        let err = router_at(base).embed("hello").await.unwrap_err();
+        assert!(err.contains("http 501"), "got: {err}");
+        assert!(
+            err.contains("ollama pull"),
+            "should tell the user the fix: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn embed_rejects_a_success_with_no_vector() {
+        let base = serve_once("200 OK", r#"{"something": "else"}"#);
+        let err = router_at(base).embed("hello").await.unwrap_err();
+        assert!(err.contains("no vector"), "got: {err}");
     }
 
     #[test]

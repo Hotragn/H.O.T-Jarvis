@@ -10,6 +10,7 @@ use crate::core::authoring::{
     authoring_messages, parse_skill_draft, refinement_message, MAX_ATTEMPTS,
 };
 use crate::core::confidence::{confidence_instruction, extract_confidence};
+use crate::core::embedding;
 use crate::core::eventlog::{Event, EventLog};
 use crate::core::forgetting;
 use crate::core::memory::{Insight, MemoryStore, StoredMessage};
@@ -145,9 +146,10 @@ async fn chat_send(state: tauri::State<'_, AppState>, text: String) -> Result<Ch
     if trimmed.is_empty() {
         return Err("empty message".into());
     }
-    // Persist the user turn and build context, releasing the lock before I/O.
-    let mut context = Vec::new();
+    // Persist the user turn and gather context, releasing the lock before I/O.
     let user_msg_id;
+    let base_system;
+    let recent;
     {
         let mem = state.memory.lock().map_err(|e| e.to_string())?;
         user_msg_id = mem
@@ -172,20 +174,54 @@ async fn chat_send(state: tauri::State<'_, AppState>, text: String) -> Result<Ch
         let lessons: Vec<String> = picked.iter().map(|c| c.content.clone()).collect();
         // Using a lesson is itself a weak signal that it's relevant.
         let _ = mem.mark_insights_used(&used_ids);
-        context.push(ChatMessage {
-            role: "system".into(),
-            content: format!(
-                "{}{}",
-                with_lessons(SYSTEM_PROMPT, &lessons),
-                confidence_instruction()
-            ),
-        });
-        for m in mem.recent_messages(20).map_err(|e| e.to_string())? {
-            context.push(ChatMessage {
-                role: m.role,
-                content: m.content,
-            });
+        base_system = format!(
+            "{}{}",
+            with_lessons(SYSTEM_PROMPT, &lessons),
+            confidence_instruction()
+        );
+        recent = mem.recent_messages(20).map_err(|e| e.to_string())?;
+    }
+
+    // Semantic recall: fish the archive for moments the recent window has
+    // already forgotten. Strictly best-effort — no embedding model means no
+    // recall, never an error — and local-only (embeddings never leave for a
+    // cloud provider, so recall can't quietly break the privacy promise).
+    let recall_section = match state.router.embed(&trimmed).await {
+        Ok(query_vec) => {
+            let mem = state.memory.lock().map_err(|e| e.to_string())?;
+            let vectors = mem
+                .embeddings_for_model(&state.router.embed_model())
+                .unwrap_or_default();
+            let recent_ids: Vec<i64> = recent.iter().map(|m| m.id).collect();
+            let hits = embedding::top_k(
+                &query_vec,
+                &vectors,
+                embedding::RECALL_IN_PROMPT,
+                embedding::RECALL_FLOOR,
+                &recent_ids,
+            );
+            let ids: Vec<i64> = hits.iter().map(|h| h.id).collect();
+            let messages = mem.messages_by_ids(&ids).unwrap_or_default();
+            embedding::recall_prompt_section(
+                &messages
+                    .into_iter()
+                    .map(|m| (m.role, m.content))
+                    .collect::<Vec<_>>(),
+            )
         }
+        Err(_) => String::new(),
+    };
+
+    let mut context = Vec::new();
+    context.push(ChatMessage {
+        role: "system".into(),
+        content: format!("{base_system}{recall_section}"),
+    });
+    for m in recent {
+        context.push(ChatMessage {
+            role: m.role,
+            content: m.content,
+        });
     }
     log_event(
         &state,
@@ -207,6 +243,15 @@ async fn chat_send(state: tauri::State<'_, AppState>, text: String) -> Result<Ch
             };
             // The UI grades this answer later; it needs the row id to do so.
             reply.msg_id = Some(assistant_msg_id);
+            // Index both turns for future recall. Best-effort: a missing
+            // embedding model just means these turns join the backfill list.
+            for (msg_id, text) in [(user_msg_id, &trimmed), (assistant_msg_id, &reply.content)] {
+                if let Ok(vector) = state.router.embed(text).await {
+                    if let Ok(mem) = state.memory.lock() {
+                        let _ = mem.upsert_embedding(msg_id, &state.router.embed_model(), &vector);
+                    }
+                }
+            }
             log_event(
                 &state,
                 "chat.assistant",
@@ -1054,6 +1099,99 @@ fn maintain_insights(state: tauri::State<'_, AppState>) -> Result<forgetting::Fo
     Ok(plan)
 }
 
+// --- semantic memory: search + backfill (§ memory tier two) ---
+
+#[derive(serde::Serialize)]
+struct SearchHit {
+    id: i64,
+    role: String,
+    content: String,
+    created_at: i64,
+    /// Cosine similarity, 0-1ish; the UI shows it as a percentage.
+    score: f32,
+}
+
+/// Meaning-based search over everything Jarvis remembers. Local-only.
+#[tauri::command]
+async fn search_memory(
+    state: tauri::State<'_, AppState>,
+    query: String,
+    limit: Option<u32>,
+) -> Result<Vec<SearchHit>, String> {
+    let q = query.trim();
+    if q.is_empty() {
+        return Ok(Vec::new());
+    }
+    let query_vec = state.router.embed(q).await?;
+    let mem = state.memory.lock().map_err(|e| e.to_string())?;
+    let vectors = mem
+        .embeddings_for_model(&state.router.embed_model())
+        .map_err(|e| e.to_string())?;
+    let hits = embedding::top_k(
+        &query_vec,
+        &vectors,
+        limit.unwrap_or(10) as usize,
+        // Lower floor than prompt recall: a human reviews these results, so
+        // borderline matches are useful here where they'd be noise in a prompt.
+        0.3,
+        &[],
+    );
+    let scores: std::collections::HashMap<i64, f32> =
+        hits.iter().map(|h| (h.id, h.score)).collect();
+    let ids: Vec<i64> = hits.iter().map(|h| h.id).collect();
+    Ok(mem
+        .messages_by_ids(&ids)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|m| SearchHit {
+            score: scores.get(&m.id).copied().unwrap_or(0.0),
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            created_at: m.created_at,
+        })
+        .collect())
+}
+
+/// Embeds messages that don't have vectors yet (history from before this
+/// feature, or turns that arrived while the embedding model was missing).
+/// Batched so one call can't run for minutes; returns (indexed, remaining).
+#[tauri::command]
+async fn index_memory(state: tauri::State<'_, AppState>) -> Result<(u32, u32), String> {
+    const BATCH: usize = 100;
+    let todo = {
+        let mem = state.memory.lock().map_err(|e| e.to_string())?;
+        let ids = mem
+            .unembedded_message_ids(BATCH)
+            .map_err(|e| e.to_string())?;
+        mem.messages_by_ids(&ids).map_err(|e| e.to_string())?
+    };
+    let mut indexed = 0u32;
+    for m in &todo {
+        // First failure aborts the batch: it's almost always "model not
+        // pulled", and failing 100 times with the same message helps nobody.
+        let vector = state.router.embed(&m.content).await?;
+        let mem = state.memory.lock().map_err(|e| e.to_string())?;
+        mem.upsert_embedding(m.id, &state.router.embed_model(), &vector)
+            .map_err(|e| e.to_string())?;
+        indexed += 1;
+    }
+    let remaining = {
+        let mem = state.memory.lock().map_err(|e| e.to_string())?;
+        mem.unembedded_message_ids(usize::MAX / 2)
+            .map_err(|e| e.to_string())?
+            .len() as u32
+    };
+    if indexed > 0 {
+        log_event(
+            &state,
+            "memory.indexed",
+            serde_json::json!({ "indexed": indexed, "remaining": remaining }),
+        );
+    }
+    Ok((indexed, remaining))
+}
+
 // --- runtime provider settings (custom models; iOS companion enabler) ---
 
 /// Facts keys for saved provider settings. An empty saved value means "no
@@ -1260,6 +1398,8 @@ pub fn run() {
             maintain_insights,
             get_provider_settings,
             set_provider_settings,
+            search_memory,
+            index_memory,
             stt_status,
             stt_device,
             stt_download_model,

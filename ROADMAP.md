@@ -17,7 +17,7 @@ Machine-readable task queue. Status: `ready` | `in-progress` | `done` | `blocked
 
 - [x] `done` Event log v0: append-only JSONL of every action (chat, notes, wipes, startups) + read-only timeline tab (§5.4 groundwork)
 - [ ] `ready` Replay v1: deterministic re-run of a session from the event log; undo for reversible actions (§5.4)
-- [ ] `ready` Memory: local vector store for semantic recall (FAISS/Chroma/Qdrant equivalent that's Rust-friendly, e.g. sqlite-vec)
+- [x] `done` Memory: semantic recall — local embeddings (Ollama `nomic-embed-text`, env/default-configurable) stored as f32 BLOBs in the existing SQLite (schema v4), brute-force cosine in Rust (sub-ms at personal-history scale; no FAISS/C extensions). Chat prompts recall up to 4 relevant past messages beyond the recent window (floor 0.45, recent turns excluded); every new turn is indexed; "Build index" backfills old history in batches; meaning-based search box in the memory view. Local-only by design: embeddings never go to cloud providers — no embedding model simply means recall is off, never an error.
 - [x] `done` Skill engine v0: manifest + versioned Rhai skills + "every skill ships a test" harness; failing skills flagged and refused (§5.1)
 - [x] `done` Skill engine v1: assistant authors skills on request (LLM writes code + test, engine validates, Reflexion refinement loop, flagged if never passing)
 - [ ] `ready` Skill quality: use Ollama structured output (format json) for authoring; consider few-shot per failure class

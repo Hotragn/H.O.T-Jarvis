@@ -230,6 +230,28 @@ export async function reflectIfDue(): Promise<number | null> {
   return invoke<number | null>("reflect_if_due");
 }
 
+// --- semantic memory: meaning-based search over everything remembered ---
+
+export interface SearchHit {
+  id: number;
+  role: string;
+  content: string;
+  created_at: number;
+  /// Cosine similarity; show as a percentage.
+  score: number;
+}
+
+export async function searchMemory(query: string, limit = 10): Promise<SearchHit[]> {
+  if (!inTauri) return [];
+  return invoke<SearchHit[]>("search_memory", { query, limit });
+}
+
+/// Backfills embeddings for old messages. Returns [indexed, remaining].
+export async function indexMemory(): Promise<[number, number]> {
+  if (!inTauri) throw new Error("No backend in the browser preview.");
+  return invoke<[number, number]>("index_memory");
+}
+
 // --- provider settings (custom models; the iOS companion enabler) ---
 
 export interface ProviderSettings {
