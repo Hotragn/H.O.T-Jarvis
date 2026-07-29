@@ -171,6 +171,8 @@ async fn chat_send(state: tauri::State<'_, AppState>, text: String) -> Result<Ch
                 mem.append_message("assistant", &reply.content)
                     .map_err(|e| e.to_string())?
             };
+            // The UI grades this answer later; it needs the row id to do so.
+            reply.msg_id = Some(assistant_msg_id);
             log_event(
                 &state,
                 "chat.assistant",
@@ -706,6 +708,37 @@ fn get_events(state: tauri::State<'_, AppState>, limit: Option<u32>) -> Result<V
         .map_err(|e| e.to_string())
 }
 
+// --- Confidence v1: calibration tracking (§5.3) ---
+
+/// Grades one answer. This is the only new input calibration needs — the
+/// confidence itself is already in the event log.
+#[tauri::command]
+fn rate_message(
+    state: tauri::State<'_, AppState>,
+    msg_id: i64,
+    helpful: bool,
+) -> Result<(), String> {
+    log_event(
+        &state,
+        crate::core::calibration::RATED_EVENT,
+        serde_json::json!({ "msg_id": msg_id, "helpful": helpful }),
+    );
+    Ok(())
+}
+
+/// Scores stated confidence against what actually happened, rebuilt from the log.
+#[tauri::command]
+fn calibration_report(
+    state: tauri::State<'_, AppState>,
+) -> Result<crate::core::calibration::CalibrationReport, String> {
+    let events = {
+        let log = state.events.lock().map_err(|e| e.to_string())?;
+        log.tail(usize::MAX / 2).map_err(|e| e.to_string())?
+    };
+    let predictions = crate::core::calibration::pair_from_events(&events);
+    Ok(crate::core::calibration::report(&predictions))
+}
+
 fn resolve_data_dir(app: &tauri::App) -> Result<PathBuf, Box<dyn std::error::Error>> {
     match std::env::var("JARVIS_DATA_DIR") {
         Ok(dir) if !dir.trim().is_empty() => Ok(PathBuf::from(dir.trim())),
@@ -791,7 +824,9 @@ pub fn run() {
             undo_event,
             replay_audit,
             export_memory,
-            wipe_memory
+            wipe_memory,
+            rate_message,
+            calibration_report
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

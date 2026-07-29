@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { inTauri, listInsights, reflectNow, type Insight } from "../lib/ipc";
+import CalibrationPanel from "../components/CalibrationPanel";
+import {
+  calibrationReport,
+  inTauri,
+  listInsights,
+  reflectNow,
+  type CalibrationReport,
+  type Insight,
+} from "../lib/ipc";
 
 // The four lesson kinds the reflection pass can emit (see reflection.rs).
 // Order here is the order the filter chips appear in.
@@ -30,12 +38,16 @@ export default function ReflectionsView() {
   const [reflecting, setReflecting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [calib, setCalib] = useState<CalibrationReport | null>(null);
 
   const refresh = useCallback(() => {
     listInsights(200)
       .then(setInsights)
       .catch((e) => setNotice(String(e)))
       .finally(() => setLoaded(true));
+    calibrationReport()
+      .then(setCalib)
+      .catch(() => {});
   }, []);
 
   useEffect(refresh, [refresh]);
@@ -106,6 +118,8 @@ export default function ReflectionsView() {
           {notice}
         </div>
       )}
+
+      <CalibrationPanel report={calib} />
 
       {insights.length > 0 && (
         <div className="reflect-filters" role="tablist" aria-label="filter lessons by kind">

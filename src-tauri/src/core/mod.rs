@@ -1,4 +1,5 @@
 pub mod authoring;
+pub mod calibration;
 pub mod confidence;
 pub mod eventlog;
 pub mod memory;

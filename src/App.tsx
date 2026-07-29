@@ -9,6 +9,7 @@ import {
   getHistory,
   getStatus,
   getTelemetry,
+  rateMessage,
   reflectIfDue,
   type Status,
   type Telemetry,
@@ -40,6 +41,8 @@ interface ChatItem {
   role: "user" | "assistant" | "system";
   content: string;
   meta?: string;
+  /// Set on assistant replies so the answer can be graded (calibration, §5.3).
+  msgId?: number | null;
 }
 
 type Tab = "chat" | "skills" | "notes" | "memory" | "events" | "reflections";
@@ -88,6 +91,8 @@ export default function App() {
   );
   const [speaking, setSpeaking] = useState(false);
   const [listening, setListening] = useState(false);
+  /// Local echo of grades given this session, so the buttons show their state.
+  const [ratings, setRatings] = useState<Record<number, boolean>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLInputElement>(null);
   const recognizerRef = useRef<{ stop: () => void } | null>(null);
@@ -284,6 +289,7 @@ export default function App() {
           role: "assistant",
           content: reply.content,
           meta: `${reply.provider} · ${reply.model}${reply.cached ? " · cached" : ""}${conf ? ` · ${conf}` : ""}`,
+          msgId: reply.msg_id,
         },
       ]);
       getStatus().then(setStatus).catch(() => {});
@@ -299,6 +305,14 @@ export default function App() {
       setBusy(false);
     }
   }, [draft, busy, voiceOn]);
+
+  // Grading a reply is the one input calibration needs; the confidence it's
+  // scored against is already in the event log. Re-rating corrects the record
+  // rather than double-counting, so the buttons stay live after a click.
+  const rate = useCallback((msgId: number, helpful: boolean) => {
+    setRatings((prev) => ({ ...prev, [msgId]: helpful }));
+    rateMessage(msgId, helpful).catch(() => {});
+  }, []);
 
   const pill = describeStatus(status);
   const coreState: CoreState = busy
@@ -434,6 +448,32 @@ export default function App() {
                 <div key={item.key} className="msg" data-role={item.role}>
                   {item.content}
                   {item.meta && <span className="msg-meta">{item.meta}</span>}
+                  {/* Grading a reply is what turns the self-rating into a
+                      measurable track record (§5.3). */}
+                  {item.role === "assistant" && typeof item.msgId === "number" && (
+                    <span className="rate-row">
+                      <button
+                        type="button"
+                        className="rate-btn"
+                        data-picked={ratings[item.msgId] === true}
+                        title="this answer was right and useful"
+                        aria-label="mark answer helpful"
+                        onClick={() => rate(item.msgId as number, true)}
+                      >
+                        ✓
+                      </button>
+                      <button
+                        type="button"
+                        className="rate-btn"
+                        data-picked={ratings[item.msgId] === false}
+                        title="this answer was wrong or unhelpful"
+                        aria-label="mark answer not helpful"
+                        onClick={() => rate(item.msgId as number, false)}
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  )}
                 </div>
               ))}
               {busy && (
