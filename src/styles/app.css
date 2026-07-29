@@ -983,6 +983,162 @@ body {
   opacity: 0.8;
 }
 
+/* --- calibration panel (§5.3): the assistant's own track record --- */
+.calib {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.calib-badge {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+  color: var(--text-dim);
+}
+
+.calib-badge[data-verdict="calibrated"] {
+  color: var(--accent-2);
+}
+
+.calib-badge[data-verdict="overconfident"] {
+  color: var(--warn);
+}
+
+.calib-badge[data-verdict="underconfident"] {
+  color: var(--accent);
+}
+
+.calib-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.calib-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-family: var(--font-mono);
+}
+
+.calib-stat-label {
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.calib-stat-value {
+  font-size: 15px;
+  font-weight: 350;
+}
+
+.calib-stat-value[data-verdict="overconfident"] {
+  color: var(--warn);
+}
+
+.calib-stat-value[data-verdict="underconfident"] {
+  color: var(--accent);
+}
+
+.calib-stat-value[data-verdict="calibrated"] {
+  color: var(--accent-2);
+}
+
+/* Reliability diagram: claimed vs delivered per confidence band. */
+.calib-bins {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.calib-bin {
+  display: grid;
+  grid-template-columns: 52px 1fr auto;
+  gap: var(--space-2);
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-dim);
+}
+
+.calib-bin-track {
+  position: relative;
+  height: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+/* What it claimed: a ghost bar behind the real one. */
+.calib-bin-claimed,
+.calib-bin-actual {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+}
+
+.calib-bin-claimed {
+  background: var(--line-strong);
+}
+
+.calib-bin-actual {
+  background: var(--accent-2);
+}
+
+/* Delivered less than claimed: mark the shortfall. */
+.calib-bin-actual[data-hot="true"] {
+  background: var(--warn);
+}
+
+/* --- reply rating (feeds calibration) --- */
+.rate-row {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.rate-btn {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-dim);
+  border-radius: var(--radius-sm);
+  padding: 1px 7px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur-quick) var(--ease-out), color var(--dur-quick) var(--ease-out);
+}
+
+.msg:hover .rate-btn,
+.rate-btn:focus-visible,
+.rate-btn[data-picked="true"] {
+  opacity: 1;
+}
+
+.rate-btn[data-picked="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.rate-btn:hover {
+  color: var(--text);
+}
+
 /* --- command palette --- */
 .palette-veil {
   position: fixed;

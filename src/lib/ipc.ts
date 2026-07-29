@@ -31,6 +31,8 @@ export interface ChatReply {
   model: string;
   cached: boolean;
   confidence: number | null;
+  /// Row id of the stored reply; needed to grade it (calibration).
+  msg_id: number | null;
 }
 
 export interface Telemetry {
@@ -198,6 +200,39 @@ export async function reflectNow(): Promise<Insight[]> {
 export async function reflectIfDue(): Promise<number | null> {
   if (!inTauri) return null;
   return invoke<number | null>("reflect_if_due");
+}
+
+// --- Confidence v1: calibration tracking ---
+
+export interface CalibrationBin {
+  low: number;
+  high: number;
+  count: number;
+  mean_confidence: number;
+  accuracy: number;
+}
+
+export interface CalibrationReport {
+  sample_size: number;
+  brier: number;
+  ece: number;
+  mean_confidence: number;
+  accuracy: number;
+  /// Positive means overconfident.
+  bias: number;
+  bins: CalibrationBin[];
+  trustworthy: boolean;
+  summary: string;
+}
+
+export async function rateMessage(msgId: number, helpful: boolean): Promise<void> {
+  if (!inTauri) return;
+  return invoke<void>("rate_message", { msgId, helpful });
+}
+
+export async function calibrationReport(): Promise<CalibrationReport | null> {
+  if (!inTauri) return null;
+  return invoke<CalibrationReport>("calibration_report");
 }
 
 export async function exportMemory(): Promise<unknown> {

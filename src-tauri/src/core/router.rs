@@ -29,6 +29,10 @@ pub struct ChatReply {
     /// Self-rated probability (0-100) that the answer is right (§5.3).
     /// Filled in by the command layer after marker extraction.
     pub confidence: Option<u8>,
+    /// Row id of the stored assistant message. Filled in by the command layer;
+    /// the UI needs it to grade the answer later (calibration, §5.3).
+    #[serde(default)]
+    pub msg_id: Option<i64>,
 }
 
 /// Provider-call failure with enough structure to drive backoff decisions.
@@ -336,6 +340,7 @@ impl Router {
             model: self.config.ollama_model.clone(),
             cached: false,
             confidence: None,
+            msg_id: None,
         })
     }
 
@@ -377,6 +382,7 @@ impl Router {
             model: model.to_string(),
             cached: false,
             confidence: None,
+            msg_id: None,
         })
     }
 }
@@ -473,6 +479,7 @@ mod tests {
                 model: "llama3.2".into(),
                 cached: false,
                 confidence: None,
+                msg_id: None,
             },
             Instant::now(),
         );
