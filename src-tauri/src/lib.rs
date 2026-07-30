@@ -898,6 +898,321 @@ fn get_events(state: tauri::State<'_, AppState>, limit: Option<u32>) -> Result<V
         .map_err(|e| e.to_string())
 }
 
+// --- M3: auto mode (§7) — guardrails first, then a cycle ---
+
+use crate::core::autonomy;
+
+/// Where the emergency stop file lives. Inside the app data dir so it works on
+/// a locked-down machine, and documented so a user can create it by hand when
+/// the UI is unresponsive — which is exactly when they'd need to.
+fn stop_file_path(data_dir: &std::path::Path) -> std::path::PathBuf {
+    data_dir.join(".jarvis").join("STOP")
+}
+
+fn autonomy_enabled(mem: &MemoryStore) -> bool {
+    mem.get_fact("autonomy.enabled")
+        .ok()
+        .flatten()
+        .map(|v| v == "true")
+        .unwrap_or(false)
+}
+
+fn autonomy_caps(mem: &MemoryStore) -> autonomy::Caps {
+    mem.get_fact("autonomy.caps")
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn last_cycle_at(mem: &MemoryStore) -> Option<i64> {
+    mem.get_fact("autonomy.last_cycle_at")
+        .ok()
+        .flatten()
+        .and_then(|v| v.parse().ok())
+}
+
+/// Everything the UI needs to show auto mode honestly, including *why* it is
+/// halted when it is.
+#[derive(serde::Serialize)]
+struct AutonomyStatus {
+    enabled: bool,
+    caps: autonomy::Caps,
+    /// None when a cycle could run right now.
+    halt: Option<autonomy::Halt>,
+    stop_file: String,
+    stop_file_exists: bool,
+    last_cycle_at: Option<i64>,
+}
+
+fn autonomy_status(state: &AppState) -> Result<AutonomyStatus, String> {
+    let stop = stop_file_path(&state.data_dir);
+    let stop_file_exists = stop.exists();
+    let mem = state.memory.lock().map_err(|e| e.to_string())?;
+    let enabled = autonomy_enabled(&mem);
+    let caps = autonomy_caps(&mem);
+    let last = last_cycle_at(&mem);
+    let env = std::env::var("JARVIS_AUTONOMY").ok();
+    let halt = autonomy::may_start(
+        enabled,
+        stop_file_exists,
+        env.as_deref(),
+        last,
+        now_unix(),
+        &caps,
+    )
+    .err();
+    Ok(AutonomyStatus {
+        enabled,
+        caps,
+        halt,
+        stop_file: stop.display().to_string(),
+        stop_file_exists,
+        last_cycle_at: last,
+    })
+}
+
+#[tauri::command]
+fn autonomy_state(state: tauri::State<'_, AppState>) -> Result<AutonomyStatus, String> {
+    autonomy_status(&state)
+}
+
+/// Turns auto mode on or off. Off is always allowed; on is still subject to the
+/// kill switch and caps at cycle time.
+#[tauri::command]
+fn autonomy_set_enabled(
+    state: tauri::State<'_, AppState>,
+    enabled: bool,
+) -> Result<AutonomyStatus, String> {
+    {
+        let mem = state.memory.lock().map_err(|e| e.to_string())?;
+        mem.set_fact("autonomy.enabled", if enabled { "true" } else { "false" })
+            .map_err(|e| e.to_string())?;
+    }
+    log_event(
+        &state,
+        "autonomy.toggled",
+        serde_json::json!({ "enabled": enabled }),
+    );
+    autonomy_status(&state)
+}
+
+#[tauri::command]
+fn autonomy_set_caps(
+    state: tauri::State<'_, AppState>,
+    caps: autonomy::Caps,
+) -> Result<AutonomyStatus, String> {
+    {
+        let mem = state.memory.lock().map_err(|e| e.to_string())?;
+        mem.set_fact(
+            "autonomy.caps",
+            &serde_json::to_string(&caps).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    autonomy_status(&state)
+}
+
+/// Creates or removes the stop file. Creating it is the emergency brake and is
+/// always permitted; removing it is how you rearm.
+#[tauri::command]
+fn autonomy_stop_file(
+    state: tauri::State<'_, AppState>,
+    engage: bool,
+) -> Result<AutonomyStatus, String> {
+    let path = stop_file_path(&state.data_dir);
+    if engage {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(
+            &path,
+            "Auto mode is halted while this file exists. Delete it to rearm.\n",
+        )
+        .map_err(|e| e.to_string())?;
+    } else if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+    }
+    log_event(
+        &state,
+        "autonomy.stop_file",
+        serde_json::json!({ "engaged": engage }),
+    );
+    autonomy_status(&state)
+}
+
+/// Reads the app's current shape for the planner.
+fn autonomy_snapshot(state: &AppState) -> Result<autonomy::AppSnapshot, String> {
+    let events = {
+        let log = state.events.lock().map_err(|e| e.to_string())?;
+        log.tail(usize::MAX / 2).map_err(|e| e.to_string())?
+    };
+    let mem = state.memory.lock().map_err(|e| e.to_string())?;
+    let last_reflection: u64 = mem
+        .get_fact("reflection.last_event_id")
+        .ok()
+        .flatten()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let untested = state
+        .skills
+        .list_skills()
+        .map(|list| {
+            list.iter()
+                .filter(|m| !matches!(m.test_status, crate::core::skills::TestStatus::Passed))
+                .count() as u32
+        })
+        .unwrap_or(0);
+    Ok(autonomy::AppSnapshot {
+        unindexed_messages: mem
+            .unembedded_message_ids(500)
+            .map(|v| v.len() as u32)
+            .unwrap_or(0),
+        events_since_reflection: events.iter().filter(|e| e.id > last_reflection).count() as u32,
+        insights: mem.insight_count().unwrap_or(0) as u32,
+        untested_skills: untested,
+    })
+}
+
+/// Dry run: what a cycle *would* do. Always available, even when halted — seeing
+/// the plan is how you decide whether to arm it.
+#[tauri::command]
+fn autonomy_plan(state: tauri::State<'_, AppState>) -> Result<autonomy::CyclePlan, String> {
+    let snap = autonomy_snapshot(&state)?;
+    let caps = {
+        let mem = state.memory.lock().map_err(|e| e.to_string())?;
+        autonomy_caps(&mem)
+    };
+    Ok(autonomy::plan_cycle(&snap, &caps))
+}
+
+/// Runs one cycle. Refuses unless every gate passes, re-checks the stop file
+/// between actions, and logs what it did with its usage.
+#[tauri::command]
+async fn autonomy_run_cycle(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    // Gate first. `may_start` is the single place that decides this.
+    let status = autonomy_status(&state)?;
+    if let Some(halt) = status.halt {
+        return Err(match halt {
+            autonomy::Halt::StopFile => {
+                "auto mode is halted by the STOP file — delete it to rearm".to_string()
+            }
+            autonomy::Halt::EnvVar => "auto mode is disabled by JARVIS_AUTONOMY".to_string(),
+            autonomy::Halt::Disabled => "auto mode is off".to_string(),
+            autonomy::Halt::TooSoon { wait_secs } => {
+                format!("too soon — next cycle in {wait_secs}s")
+            }
+        });
+    }
+
+    let plan = {
+        let snap = autonomy_snapshot(&state)?;
+        autonomy::plan_cycle(&snap, &status.caps)
+    };
+
+    let started = Instant::now();
+    let mut usage = autonomy::Usage::default();
+    let mut done: Vec<serde_json::Value> = Vec::new();
+    let mut stop_reason = plan.stop_reason;
+    let stop_path = stop_file_path(&state.data_dir);
+
+    for planned in &plan.actions {
+        // The brake is checked between every action, not just at the start: a
+        // cycle you can't interrupt isn't really interruptible.
+        if stop_path.exists() {
+            stop_reason = autonomy::StopReason::Killed;
+            break;
+        }
+        let elapsed = started.elapsed().as_secs() as u32;
+        usage.seconds = elapsed;
+        if let Some(stop) = usage.room_for(&status.caps, planned.tool_calls) {
+            stop_reason = stop;
+            break;
+        }
+
+        // Belt and braces at the point of execution, not only at planning.
+        if autonomy::classify(planned.action) != autonomy::Clearance::Auto {
+            continue;
+        }
+
+        let outcome = match planned.action {
+            autonomy::ActionKind::ReplayAudit => replay_audit_state(state.clone())
+                .map(|r| serde_json::json!({ "deterministic": r.deterministic })),
+            autonomy::ActionKind::TidyInsights => maintain_insights(state.clone())
+                .map(|p| serde_json::json!({ "forgot": p.forget.len(), "kept": p.kept })),
+            autonomy::ActionKind::IndexMemory => index_memory(state.clone())
+                .await
+                .map(|(indexed, remaining)| {
+                    serde_json::json!({ "indexed": indexed, "remaining": remaining })
+                }),
+            autonomy::ActionKind::Reflect => reflect_now(state.clone())
+                .await
+                .map(|learned| serde_json::json!({ "insights": learned.len() })),
+            autonomy::ActionKind::TestSkills => {
+                // Verification only: re-run each skill's own bundled test.
+                let names: Vec<String> = state
+                    .skills
+                    .list_skills()
+                    .map_err(|e| e.to_string())?
+                    .into_iter()
+                    .map(|m| m.name)
+                    .collect();
+                let mut passed = 0usize;
+                let mut failed = 0usize;
+                for name in &names {
+                    match state.skills.test_skill(name) {
+                        Ok(m)
+                            if matches!(
+                                m.test_status,
+                                crate::core::skills::TestStatus::Passed
+                            ) =>
+                        {
+                            passed += 1
+                        }
+                        _ => failed += 1,
+                    }
+                }
+                Ok(serde_json::json!({ "passed": passed, "failed": failed }))
+            }
+            // Unreachable: the classify check above already filtered these.
+            _ => Err("action is not cleared for unattended work".to_string()),
+        };
+
+        usage.record(planned.tool_calls, started.elapsed().as_secs() as u32);
+        done.push(serde_json::json!({
+            "action": planned.action,
+            "reason": planned.reason,
+            "result": outcome.as_ref().ok(),
+            "error": outcome.as_ref().err(),
+        }));
+    }
+
+    usage.seconds = started.elapsed().as_secs() as u32;
+    {
+        let mem = state.memory.lock().map_err(|e| e.to_string())?;
+        mem.set_fact("autonomy.last_cycle_at", &now_unix().to_string())
+            .map_err(|e| e.to_string())?;
+    }
+    log_event(
+        &state,
+        "autonomy.cycle",
+        serde_json::json!({
+            "did": done,
+            "usage": usage,
+            "stop_reason": stop_reason,
+            "deferred": plan.deferred.len(),
+        }),
+    );
+    Ok(serde_json::json!({
+        "did": done,
+        "usage": usage,
+        "stop_reason": stop_reason,
+        "deferred": plan.deferred,
+    }))
+}
+
 // --- Voice v2: wake word + hands-free conversation (§6.4) ---
 
 /// The saved wake phrase, or the default. Stored as a fact so it survives
@@ -1812,6 +2127,12 @@ pub fn run() {
             replay_timeline,
             replay_state_at,
             replay_audit_state,
+            autonomy_state,
+            autonomy_set_enabled,
+            autonomy_set_caps,
+            autonomy_stop_file,
+            autonomy_plan,
+            autonomy_run_cycle,
             voice_session,
             voice_hands_free,
             voice_set_wake_phrase,

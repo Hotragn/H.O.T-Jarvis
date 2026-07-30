@@ -47,7 +47,8 @@ Machine-readable task queue. Status: `ready` | `in-progress` | `done` | `blocked
 
 ## M3 — Autonomy
 
-- [ ] `blocked (needs CI + guardrails proven)` Auto mode: scheduler loop over this roadmap with resource caps, kill switch, dry-run gates
+- [x] `done` Auto mode (§7): the guardrails are the feature. `core::autonomy` is a deny-by-default allowlist — a new action anywhere in the app is Forbidden for the loop until someone deliberately classifies it, so forgetting about safety produces a refusal rather than an incident. Three independent gates per cycle (kill switch, budget, per-action clearance). Kill switch is both a STOP file in the app data dir and `JARVIS_AUTONOMY`, either halts, and the file overrides even "armed". Conservative caps (3 actions / 6 tool calls / 120s / 15-min gap), checked *before* spending and re-checked between actions. Dry-run plan always visible; the loop only ever does bounded self-maintenance (replay audit, skill tests, indexing, reflection, tidying) and defers note-writing, skill authoring and skill running to a human. Wipes, deletes, settings changes and anything external are Forbidden outright. Every cycle logged with its usage and stop reason.
+- [ ] `ready` Auto mode v2: a background heartbeat that runs cycles unattended (today a cycle is user-triggered from the panel); consider self-approval for the deferred set only with an explicit opt-in per §2
 - [ ] `ready` Research-to-feature loop: scan agent papers, propose issues
 
 ## M4 — Mobile (iOS)
