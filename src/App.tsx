@@ -13,16 +13,24 @@ import {
   reflectIfDue,
   sttCancel,
   sttDownloadModel,
+  sttListen,
   sttStart,
   sttStatus,
   sttStop,
+  voiceAdvance,
+  voiceHandsFree,
+  voiceHeard,
+  voiceSession,
+  type ChatReply,
   type SttReadiness,
+  type VoiceSession,
   type Status,
   type Telemetry,
 } from "./lib/ipc";
 import { trustLabel, trustTone, trustWarning } from "./lib/confidence";
 import { describeStatus } from "./lib/status";
 import { platform, showSystemTelemetry } from "./lib/platform";
+import { isCapturing, nextHint, phaseBadge } from "./lib/handsfree";
 import {
   nextTheme,
   resolveInitialTheme,
@@ -113,6 +121,8 @@ export default function App() {
   /// True only while the capture device is opening, so a double-click can't
   /// start a second take.
   const [starting, setStarting] = useState(false);
+  /// Voice v2: the hands-free session mirrored from the Rust core.
+  const [voice, setVoice] = useState<VoiceSession | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLInputElement>(null);
   const recognizerRef = useRef<{ stop: () => void } | null>(null);
@@ -269,9 +279,130 @@ export default function App() {
     });
   }, []);
 
+
+  // Voice v2: mirror the session, and keep the follow-up window ticking so it
+  // can expire. Every decision lives in the Rust core; this only reports time
+  // passing and carries out the action it's told to.
+  useEffect(() => {
+    voiceSession().then(setVoice).catch(() => {});
+  }, []);
+
+  const voicePhase = voice?.phase ?? "off";
+
+  useEffect(() => {
+    if (voicePhase === "off") return;
+    const TICK_MS = 500;
+    const timer = window.setInterval(() => {
+      voiceAdvance("tick", TICK_MS).then(setVoice).catch(() => {});
+    }, TICK_MS);
+    return () => window.clearInterval(timer);
+  }, [voicePhase]);
+
   const say = useCallback((content: string) => {
     setItems((prev) => [...prev, { key: `s-${Date.now()}`, role: "system", content }]);
   }, []);
+
+  /// Appends an assistant reply with its calibrated confidence label, warning
+  /// and tone. Shared by the typed and hands-free paths so the two can't drift.
+  const appendReply = useCallback((reply: ChatReply) => {
+    const conf = trustLabel(reply.trust) ?? null;
+    setItems((prev) => [
+      ...prev,
+      {
+        key: `a-${Date.now()}`,
+        role: "assistant",
+        content: reply.content,
+        meta: `${reply.provider} · ${reply.model}${reply.cached ? " · cached" : ""}${conf ? ` · ${conf}` : ""}`,
+        msgId: reply.msg_id,
+        warning: trustWarning(reply.trust),
+        tone: trustTone(reply.trust),
+      },
+    ]);
+    setLastConfidence(reply.confidence);
+  }, []);
+
+  /// Guards the listen loop so only one capture is ever in flight.
+  const listeningRef = useRef(false);
+
+  const toggleHandsFree = useCallback(async () => {
+    const turningOn = !voice || voice.phase === "off";
+    try {
+      const next = await voiceHandsFree(turningOn);
+      setVoice(next);
+      if (!turningOn) {
+        listeningRef.current = false;
+        say("Hands-free off.");
+      } else {
+        say(`Hands-free on. Say "${next.wake_phrase}" and I'll listen.`);
+      }
+    } catch (e) {
+      say(String(e));
+    }
+  }, [voice, say]);
+
+  // The hands-free loop. Every *decision* is the Rust core's (wake matching,
+  // phase, follow-up window); this only captures when told to and performs the
+  // action it's handed. Keeping the policy there is what made it testable.
+  useEffect(() => {
+    if (!voice || !voice.wants_audio || listeningRef.current || busy) return;
+    let cancelled = false;
+    listeningRef.current = true;
+
+    (async () => {
+      try {
+        const heard = await sttListen();
+        if (cancelled) return;
+        if (!heard.transcript.trim()) return; // silence: loop again
+        const result = await voiceHeard(heard.transcript, heard.duration_ms);
+        if (cancelled) return;
+        setVoice(result.session);
+
+        const action = result.action;
+        if (action.action === "say") {
+          say(action.text);
+          if (voiceOn) speak(action.text);
+        } else if (action.action === "sleep") {
+          say("Hands-free off.");
+        } else if (action.action === "ask") {
+          // Show what was heard, then run the normal chat path.
+          setItems((prev) => [
+            ...prev,
+            { key: `u-${Date.now()}`, role: "user", content: action.text },
+          ]);
+          try {
+            const reply = await chatSend(action.text);
+            appendReply(reply);
+            const spoken = voiceOn && !!reply.content;
+            await voiceAdvance(spoken ? "answered_speaking" : "answered_silent").then(setVoice);
+            if (spoken) {
+              speak(reply.content, {
+                onstart: () => setSpeaking(true),
+                onend: () => {
+                  setSpeaking(false);
+                  voiceAdvance("finished_speaking").then(setVoice).catch(() => {});
+                },
+              });
+            }
+          } catch (e) {
+            say(String(e));
+            await voiceAdvance("failed").then(setVoice).catch(() => {});
+          }
+        }
+      } catch (e) {
+        // A capture failure must not spin the loop; report and stand down.
+        say(String(e));
+        await voiceHandsFree(false).then(setVoice).catch(() => {});
+      } finally {
+        listeningRef.current = false;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      listeningRef.current = false;
+    };
+  }, [voice, busy, voiceOn, say, appendReply]);
+
 
   // Voice v1: the local Whisper path. Audio is captured and transcribed in the
   // Rust core, which is the only way dictation can work inside WebView2 (it has
@@ -405,19 +536,7 @@ export default function App() {
       }
       // Confidence v2: label by the calibrated value, and warn when the record
       // says a confident-looking answer is really a guess.
-      const conf = trustLabel(reply.trust) ?? null;
-      setItems((prev) => [
-        ...prev,
-        {
-          key: `a-${Date.now()}`,
-          role: "assistant",
-          content: reply.content,
-          meta: `${reply.provider} · ${reply.model}${reply.cached ? " · cached" : ""}${conf ? ` · ${conf}` : ""}`,
-          msgId: reply.msg_id,
-          warning: trustWarning(reply.trust),
-          tone: trustTone(reply.trust),
-        },
-      ]);
+      appendReply(reply);
       getStatus().then(setStatus).catch(() => {});
       // Periodic reflection: fires for real only when enough conversation
       // has accumulated since the last pass.
@@ -430,7 +549,7 @@ export default function App() {
     } finally {
       setBusy(false);
     }
-  }, [draft, busy, voiceOn]);
+  }, [draft, busy, voiceOn, appendReply]);
 
   // Grading a reply is the one input calibration needs; the confidence it's
   // scored against is already in the event log. Re-rating corrects the record
@@ -486,6 +605,26 @@ export default function App() {
             aria-label={voiceOn ? "turn voice replies off" : "turn voice replies on"}
           >
             {voiceOn ? "voice on" : "voice off"}
+          </button>
+        )}
+        {micRoute === "local" && (
+          <button
+            type="button"
+            className="theme-toggle"
+            data-active={voice ? voice.phase !== "off" : false}
+            data-capturing={isCapturing(voice)}
+            title={
+              nextHint(voice) ??
+              "hands-free: say the wake phrase instead of clicking the mic"
+            }
+            aria-label={
+              voice && voice.phase !== "off"
+                ? "turn hands-free off"
+                : "turn hands-free on"
+            }
+            onClick={() => void toggleHandsFree()}
+          >
+            {voice ? phaseBadge(voice.phase) : "hands-free"}
           </button>
         )}
         <button

@@ -126,6 +126,21 @@ body {
   outline-offset: 2px;
 }
 
+/* Voice v2: hands-free. The capturing state has to be unmistakable — whether
+   the mic is open is a privacy question, not just a UI detail. */
+.theme-toggle[data-capturing="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 12px var(--accent-glow);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+/* Armed but not capturing: on, clearly not listening. */
+.theme-toggle[data-active="true"]:not([data-capturing="true"]) {
+  color: var(--accent-2);
+  border-color: var(--accent-2);
+}
+
 /* --- tabs --- */
 .tab-bar {
   position: relative;

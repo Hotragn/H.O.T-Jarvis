@@ -45,6 +45,10 @@ struct AppState {
     /// The loaded Whisper model, kept warm between takes (loading costs seconds).
     #[cfg(feature = "local-whisper")]
     transcriber: Mutex<Option<crate::core::whisper::WhisperTranscriber>>,
+    /// Voice v2: the hands-free conversation session. Its phase decides whether
+    /// the mic should be open, so the whole policy lives in one tested place.
+    #[cfg(desktop)]
+    session: Mutex<crate::core::conversation::Session>,
 }
 
 /// The live calibration report, rebuilt from the event log. Cheap enough to do
@@ -894,6 +898,180 @@ fn get_events(state: tauri::State<'_, AppState>, limit: Option<u32>) -> Result<V
         .map_err(|e| e.to_string())
 }
 
+// --- Voice v2: wake word + hands-free conversation (§6.4) ---
+
+/// The saved wake phrase, or the default. Stored as a fact so it survives
+/// restarts and can be changed on a phone with no env vars.
+#[cfg(desktop)]
+fn saved_wake_phrase(mem: &MemoryStore) -> String {
+    mem.get_fact("voice.wake_phrase")
+        .ok()
+        .flatten()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| crate::core::hotword::DEFAULT_WAKE_PHRASE.to_string())
+}
+
+/// Current hands-free state, for the UI.
+#[derive(serde::Serialize)]
+struct VoiceSession {
+    phase: crate::core::conversation::Phase,
+    wake_phrase: String,
+    /// Whether the mic should be open right now — the UI mirrors this rather
+    /// than deciding for itself.
+    wants_audio: bool,
+    needs_wake: bool,
+    follow_up_remaining_ms: u32,
+}
+
+#[cfg(desktop)]
+fn snapshot(session: &crate::core::conversation::Session) -> VoiceSession {
+    VoiceSession {
+        phase: session.phase(),
+        wake_phrase: session.wake_phrase().to_string(),
+        wants_audio: session.phase().wants_audio(),
+        needs_wake: session.phase().needs_wake(),
+        follow_up_remaining_ms: session.follow_up_remaining_ms(),
+    }
+}
+
+#[tauri::command]
+fn voice_session(state: tauri::State<'_, AppState>) -> Result<VoiceSession, String> {
+    #[cfg(desktop)]
+    {
+        let session = state.session.lock().map_err(|e| e.to_string())?;
+        Ok(snapshot(&session))
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = state;
+        Err(MOBILE_NO_CAPTURE.into())
+    }
+}
+
+/// Turns hands-free on or off.
+#[tauri::command]
+fn voice_hands_free(state: tauri::State<'_, AppState>, on: bool) -> Result<VoiceSession, String> {
+    #[cfg(desktop)]
+    {
+        let snap = {
+            let mut session = state.session.lock().map_err(|e| e.to_string())?;
+            if on {
+                session.start();
+            } else {
+                session.stop();
+                // Drop any take in flight so the mic actually closes.
+                state.recorder.cancel();
+            }
+            snapshot(&session)
+        };
+        log_event(
+            &state,
+            "voice.hands_free",
+            serde_json::json!({ "on": on, "phase": snap.phase }),
+        );
+        Ok(snap)
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = (state, on);
+        Err(MOBILE_NO_CAPTURE.into())
+    }
+}
+
+/// Sets the wake phrase (persisted).
+#[tauri::command]
+fn voice_set_wake_phrase(
+    state: tauri::State<'_, AppState>,
+    phrase: String,
+) -> Result<VoiceSession, String> {
+    #[cfg(desktop)]
+    {
+        let trimmed = phrase.trim();
+        if trimmed.split_whitespace().count() < 2 {
+            // One-word phrases fire on ordinary speech constantly.
+            return Err("use at least two words, so it doesn't trigger by accident".into());
+        }
+        {
+            let mem = state.memory.lock().map_err(|e| e.to_string())?;
+            mem.set_fact("voice.wake_phrase", trimmed)
+                .map_err(|e| e.to_string())?;
+        }
+        let mut session = state.session.lock().map_err(|e| e.to_string())?;
+        let was_on = session.phase() != crate::core::conversation::Phase::Off;
+        *session = crate::core::conversation::Session::new(trimmed);
+        if was_on {
+            session.start();
+        }
+        Ok(snapshot(&session))
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = (state, phrase);
+        Err(MOBILE_NO_CAPTURE.into())
+    }
+}
+
+/// Feeds one finished, transcribed take into the session and returns what to do
+/// next. The audio loop lives in the UI (it already owns speech synthesis and
+/// the chat call); this keeps every *decision* in the tested core.
+#[tauri::command]
+fn voice_heard(
+    state: tauri::State<'_, AppState>,
+    transcript: String,
+    duration_ms: u32,
+) -> Result<serde_json::Value, String> {
+    #[cfg(desktop)]
+    {
+        let (action, snap) = {
+            let mut session = state.session.lock().map_err(|e| e.to_string())?;
+            let action = session.heard(&transcript, duration_ms);
+            (action, snapshot(&session))
+        };
+        if !matches!(action, crate::core::conversation::Action::Idle) {
+            log_event(
+                &state,
+                "voice.hands_free_action",
+                serde_json::json!({ "action": action, "phase": snap.phase }),
+            );
+        }
+        Ok(serde_json::json!({ "action": action, "session": snap }))
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = (state, transcript, duration_ms);
+        Err(MOBILE_NO_CAPTURE.into())
+    }
+}
+
+/// Reports a lifecycle event back to the session: the model answered, speech
+/// finished, the call failed, or time passed.
+#[tauri::command]
+fn voice_advance(
+    state: tauri::State<'_, AppState>,
+    event: String,
+    elapsed_ms: Option<u32>,
+) -> Result<VoiceSession, String> {
+    #[cfg(desktop)]
+    {
+        let mut session = state.session.lock().map_err(|e| e.to_string())?;
+        match event.as_str() {
+            "answered_speaking" => session.answered(true),
+            "answered_silent" => session.answered(false),
+            "finished_speaking" => session.finished_speaking(),
+            "failed" => session.failed(),
+            "tick" => session.tick(elapsed_ms.unwrap_or(0)),
+            other => return Err(format!("unknown voice event '{other}'")),
+        };
+        Ok(snapshot(&session))
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = (state, event, elapsed_ms);
+        Err(MOBILE_NO_CAPTURE.into())
+    }
+}
+
 // --- Confidence v1: calibration tracking (§5.3) ---
 
 /// Grades one answer. This is the only new input calibration needs — the
@@ -1014,6 +1192,83 @@ async fn stt_download_model(state: tauri::State<'_, AppState>) -> Result<String,
         serde_json::json!({ "model": spec.id, "approx_mb": spec.approx_mb }),
     );
     Ok(spec.id.to_string())
+}
+
+/// Hands-free capture: listen until the speaker stops, then transcribe.
+///
+/// One call per utterance, driven in a loop by the UI while the session wants
+/// audio. Returns an empty transcript when the window passed in silence, which
+/// is the common case while merely armed — the caller loops again rather than
+/// treating it as an error.
+///
+/// Blocking work runs on a worker thread so the UI thread is never held.
+#[tauri::command]
+async fn stt_listen(
+    state: tauri::State<'_, AppState>,
+    max_wait_ms: Option<u32>,
+    max_utterance_ms: Option<u32>,
+) -> Result<serde_json::Value, String> {
+    #[cfg(not(desktop))]
+    {
+        let _ = (state, max_wait_ms, max_utterance_ms);
+        return Err(MOBILE_NO_CAPTURE.into());
+    }
+    #[cfg(desktop)]
+    {
+        let max_wait = std::time::Duration::from_millis(u64::from(max_wait_ms.unwrap_or(6_000)));
+        let max_utterance =
+            std::time::Duration::from_millis(u64::from(max_utterance_ms.unwrap_or(15_000)));
+
+        // cpal capture is blocking; keep it off the async runtime's thread.
+        let captured = tauri::async_runtime::spawn_blocking(move || {
+            crate::mic::listen_until_endpoint(max_wait, max_utterance)
+        })
+        .await
+        .map_err(|e| format!("capture task failed: {e}"))??;
+
+        let Some(captured) = captured else {
+            // Silence. Not an error — the caller loops.
+            return Ok(serde_json::json!({ "transcript": "", "duration_ms": 0 }));
+        };
+        let duration_ms = (captured.duration_secs() * 1000.0) as u32;
+        let pcm = captured.for_whisper();
+        if pcm.is_empty()
+            || !crate::core::audio::has_speech(&pcm, crate::core::audio::WHISPER_SAMPLE_RATE)
+        {
+            return Ok(serde_json::json!({ "transcript": "", "duration_ms": duration_ms }));
+        }
+
+        #[cfg(feature = "local-whisper")]
+        {
+            let spec = stt::resolve_model(None);
+            if !stt::is_downloaded(&state.data_dir, spec) {
+                return Err(format!(
+                    "the {} speech model isn't downloaded yet (~{} MB)",
+                    spec.id, spec.approx_mb
+                ));
+            }
+            let mut slot = state.transcriber.lock().map_err(|e| e.to_string())?;
+            if slot.is_none() {
+                let dir = stt::model_dir(&state.data_dir, spec);
+                *slot = Some(crate::core::whisper::WhisperTranscriber::load(&dir, spec)?);
+            }
+            let text = slot
+                .as_mut()
+                .expect("transcriber loaded above")
+                .transcribe(&pcm)?;
+            Ok(serde_json::json!({ "transcript": text, "duration_ms": duration_ms }))
+        }
+        #[cfg(not(feature = "local-whisper"))]
+        {
+            // `state` is only read by the whisper branch; keep the signature
+            // stable across both builds rather than cfg-ing the parameter.
+            let _ = state;
+            Err(
+                "hands-free needs the local speech model — rebuild with `--features local-whisper`"
+                    .into(),
+            )
+        }
+    }
 }
 
 /// Begins a push-to-talk take. Returns the negotiated capture format.
@@ -1482,6 +1737,9 @@ pub fn run() {
             let mut router_cfg = RouterConfig::from_env();
             apply_saved_provider_config(&memory, &mut router_cfg);
             let router = Router::new(router_cfg);
+            // Read the wake phrase before `memory` moves into AppState.
+            #[cfg(desktop)]
+            let wake_phrase = saved_wake_phrase(&memory);
             let notes = NotesTool::new(&data_dir);
             let skills = SkillEngine::new(&data_dir);
             let mut events = EventLog::open(&data_dir.join("events.jsonl"))?;
@@ -1502,6 +1760,8 @@ pub fn run() {
                 recorder: crate::mic::MicRecorder::new(),
                 #[cfg(feature = "local-whisper")]
                 transcriber: Mutex::new(None),
+                #[cfg(desktop)]
+                session: Mutex::new(crate::core::conversation::Session::new(wake_phrase)),
             });
             #[cfg(desktop)]
             setup_desktop_ambient(app)?;
@@ -1552,8 +1812,14 @@ pub fn run() {
             replay_timeline,
             replay_state_at,
             replay_audit_state,
+            voice_session,
+            voice_hands_free,
+            voice_set_wake_phrase,
+            voice_heard,
+            voice_advance,
             stt_status,
             stt_device,
+            stt_listen,
             stt_download_model,
             stt_start,
             stt_stop,

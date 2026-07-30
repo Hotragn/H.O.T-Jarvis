@@ -10,6 +10,7 @@
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
@@ -127,6 +128,131 @@ impl MicRecorder {
             }
         }
     }
+}
+
+/// Captures one utterance and stops on its own, using the tested energy
+/// endpointer instead of waiting for a click. This is what makes hands-free
+/// possible: push-to-talk needs a human to say when they finished, and a wake
+/// phrase can't.
+///
+/// Returns `Ok(None)` when the window expired with no speech at all, which is
+/// the normal case while merely armed and waiting — a silent room must not
+/// produce a transcription attempt on every cycle.
+///
+/// Bounded twice on purpose: `max_wait` caps how long we sit in silence, and
+/// `max_utterance` caps a single take, so a stuck-open microphone or a
+/// television in the room can never grow an unbounded buffer.
+pub fn listen_until_endpoint(
+    max_wait: Duration,
+    max_utterance: Duration,
+) -> Result<Option<Captured>, String> {
+    let host = cpal::default_host();
+    let device = host
+        .default_input_device()
+        .ok_or("no microphone found — check your input device")?;
+    let config = device
+        .default_input_config()
+        .map_err(|e| format!("microphone has no usable format: {e}"))?;
+    let sample_rate = config.sample_rate().0;
+    let channels = config.channels();
+
+    let buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
+    let sink = Arc::clone(&buffer);
+    let on_error = |e| eprintln!("microphone stream error: {e}");
+
+    let stream = match config.sample_format() {
+        cpal::SampleFormat::F32 => device.build_input_stream(
+            &config.into(),
+            move |data: &[f32], _: &_| append(&sink, data.iter().copied()),
+            on_error,
+            None,
+        ),
+        cpal::SampleFormat::I16 => device.build_input_stream(
+            &config.into(),
+            move |data: &[i16], _: &_| {
+                append(&sink, data.iter().map(|s| *s as f32 / i16::MAX as f32))
+            },
+            on_error,
+            None,
+        ),
+        cpal::SampleFormat::U16 => device.build_input_stream(
+            &config.into(),
+            move |data: &[u16], _: &_| {
+                append(
+                    &sink,
+                    data.iter()
+                        .map(|s| (*s as f32 / u16::MAX as f32) * 2.0 - 1.0),
+                )
+            },
+            on_error,
+            None,
+        ),
+        other => Err(cpal::BuildStreamError::BackendSpecific {
+            err: cpal::BackendSpecificError {
+                description: format!("unsupported sample format {other:?}"),
+            },
+        }),
+    }
+    .map_err(|e| format!("could not open the microphone: {e}"))?;
+
+    stream
+        .play()
+        .map_err(|e| format!("could not start the microphone: {e}"))?;
+
+    // The endpointer works on mono frames at the device rate; downmix as we go
+    // so its energy maths sees what a listener would hear.
+    let mut endpointer = audio::Endpointer::new(sample_rate);
+    let mut consumed = 0usize; // interleaved samples already fed to the endpointer
+    let started = std::time::Instant::now();
+    let mut ended_cleanly = false;
+
+    loop {
+        std::thread::sleep(Duration::from_millis(40));
+
+        let available = {
+            let buf = buffer.lock().map_err(|e| e.to_string())?;
+            buf.len()
+        };
+        if available > consumed {
+            let chunk: Vec<f32> = {
+                let buf = buffer.lock().map_err(|e| e.to_string())?;
+                buf[consumed..available].to_vec()
+            };
+            consumed = available;
+            let mono = audio::downmix_to_mono(&chunk, channels);
+            if endpointer.push(&mono) {
+                ended_cleanly = true;
+                break;
+            }
+        }
+
+        if endpointer.speech_started() {
+            if started.elapsed() >= max_utterance {
+                // Someone (or something) is talking indefinitely; take what we
+                // have rather than growing forever.
+                ended_cleanly = true;
+                break;
+            }
+        } else if started.elapsed() >= max_wait {
+            // Silence for the whole window: nothing was said.
+            break;
+        }
+    }
+
+    drop(stream);
+
+    if !ended_cleanly && !endpointer.speech_started() {
+        return Ok(None);
+    }
+    let samples = buffer
+        .lock()
+        .map(|b| b.clone())
+        .map_err(|e| e.to_string())?;
+    Ok(Some(Captured {
+        samples,
+        sample_rate,
+        channels,
+    }))
 }
 
 /// Name of the default input device, for the UI. `None` when there isn't one.
