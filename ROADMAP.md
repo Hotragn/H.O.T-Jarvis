@@ -66,6 +66,7 @@ Groundwork planned in [docs/ios/README.md](docs/ios/README.md). Build/submit nee
 - [x] `done` Flagship cinematic ("a skill is born") rendered free via HyperFrames (HTML→MP4), 1080p/12s, wired into the hero slot.
 - [x] `done` Render the remaining loops (hero ambient, memory, confidence, undo) via HyperFrames — all five 1080p clips live in every slot.
 - [x] `done` Deploy the site to GitHub Pages: landing at the root, Astro docs built under `/docs` in one `deploy-pages.yml` deploy. Pages enabled (Source = GitHub Actions). Landing https://hotragn.github.io/H.O.T-Jarvis/ · docs https://hotragn.github.io/H.O.T-Jarvis/docs/
+- [x] `done` Docs premium theme pass: the docs now share the app's visual language — engineering grid + radial glow surface, Inter/JetBrains Mono, 47rem reading measure on doc pages (splash stays wide), accent rail on the active nav item and TOC entry (same grammar as the app's tab underline), mono-uppercase table headers, branded asides, hover-lift cards, bordered code frames with a warmer border on terminal blocks, focus rings and selection colour. Light-theme parity and reduced-motion guarded.
 - [ ] `ready` README GIF / hero — the 10-second screen recording (needs owner or screen capture).
 
 ## Chores

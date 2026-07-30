@@ -5,10 +5,10 @@
   "scripts": {
     "dev": "astro dev",
     "start": "astro dev",
-    "build": "astro build && node scripts/check-links.mjs dist \"${DOCS_BASE:-/}\"",
+    "build": "astro build && node scripts/check-links.mjs dist",
     "preview": "astro preview",
     "astro": "astro",
-    "check:links": "node scripts/check-links.mjs dist \"${DOCS_BASE:-/}\""
+    "check:links": "node scripts/check-links.mjs dist"
   },
   "dependencies": {
     "@astrojs/sitemap": "^3.7.3",
