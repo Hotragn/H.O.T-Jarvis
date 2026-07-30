@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  autonomyLastBeat,
   autonomyPlan,
   autonomyRunCycle,
   autonomySetEnabled,
@@ -8,23 +9,9 @@ import {
   inTauri,
   type AutonomyStatus,
   type CyclePlan,
-  type Halt,
+  type LastBeat,
 } from "../lib/ipc";
-
-/// Plain-English reason the loop is halted. Never a bare enum: if auto mode
-/// isn't running, the user deserves to know exactly why.
-function haltText(halt: Halt): string {
-  switch (halt.reason) {
-    case "stop_file":
-      return "Halted by the STOP file. Release it to rearm.";
-    case "env_var":
-      return "Halted by the JARVIS_AUTONOMY environment variable.";
-    case "disabled":
-      return "Auto mode is off.";
-    case "too_soon":
-      return `Rate-limited — next cycle in ${halt.wait_secs}s.`;
-  }
-}
+import { beatText, haltText } from "../lib/autonomy";
 
 // Auto mode (§7). The guardrails are the feature, so the panel leads with them:
 // what it may do, what it will never do without asking, and how to stop it.
@@ -33,13 +20,22 @@ export default function AutonomyPanel() {
   const [plan, setPlan] = useState<CyclePlan | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [beat, setBeat] = useState<LastBeat | null>(null);
 
   const refresh = useCallback(() => {
     autonomyState().then(setStatus).catch(() => {});
     autonomyPlan().then(setPlan).catch(() => {});
+    autonomyLastBeat().then(setBeat).catch(() => {});
   }, []);
 
   useEffect(refresh, [refresh]);
+
+  // Poll while the panel is open so the heartbeat line stays truthful. Cheap:
+  // three local reads, no model calls, and it stops when the panel closes.
+  useEffect(() => {
+    const timer = window.setInterval(refresh, 10_000);
+    return () => window.clearInterval(timer);
+  }, [refresh]);
 
   const guard = async (fn: () => Promise<AutonomyStatus>) => {
     setBusy(true);
@@ -159,8 +155,17 @@ export default function AutonomyPanel() {
           <span>
             every <b>{Math.round(status.caps.min_cycle_gap_secs / 60)}</b> min
           </span>
+          <span>
+            after <b>{Math.round(status.caps.min_idle_secs / 60)}</b> min idle
+          </span>
         </div>
       )}
+
+      {/* Proof of life for the background loop. */}
+      <div className="autonomy-beat">
+        <span className="autonomy-beat-dot" data-live={status?.enabled ? "yes" : "no"} />
+        heartbeat · {status?.enabled ? beatText(beat) : "idle until you arm it"}
+      </div>
 
       {/* The dry run: what a cycle would do, before it does it. */}
       <div className="panel-title-row">

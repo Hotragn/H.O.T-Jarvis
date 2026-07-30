@@ -58,7 +58,8 @@ Deliberately conservative, and configurable:
 - **3 actions** per cycle
 - **6 tool calls** per cycle (the thing that actually costs time and free-tier limit)
 - **120 seconds** wall clock
-- **15 minutes** minimum between cycles, so a heartbeat can't become a busy loop
+- **15 minutes** minimum between cycles, so the heartbeat can't become a busy loop
+- **2 minutes** of you being idle before an unattended cycle starts
 
 Caps are checked *before* an action runs, not detected afterwards, so a limit is
 never exceeded. Every cycle is logged with its usage and the reason it stopped.
@@ -69,6 +70,37 @@ The panel always shows what the next cycle *would* do and why, before it does
 anything — including the actions it's deferring to you. A cycle you can't
 preview isn't one you can trust.
 
-Today a cycle is **triggered by you** from the panel. An unattended background
-heartbeat is the next step; the policy engine and every gate it needs are
-already in place and tested.
+## The heartbeat
+
+Once armed, a background loop wakes every few seconds and asks one question:
+may a cycle run right now? If any gate says no, nothing happens and the loop
+goes back to sleep.
+
+Waking often and doing almost nothing is deliberate. The alternative is a loop
+that sleeps for 15 minutes at a time, which makes disarming look broken: you'd
+press the button and watch a cycle start anyway. The poll interval is a quarter
+of the cycle gap, clamped to 5 to 60 seconds, so pressing stop feels immediate
+while the actual work stays rate-limited.
+
+The loop never decides anything itself. The interval, every gate, and the plan
+all come from the same tested policy code that the manual **Run one cycle**
+button uses. There is no second, looser path into autonomous work.
+
+### It waits while you're using the app
+
+Reflection and indexing both make model calls. Doing that while you're
+mid-conversation makes Jarvis feel slow for no visible reason, so a cycle only
+starts after you've been idle for a couple of minutes. Deferring costs nothing:
+none of this work is urgent.
+
+If several gates are closed at once, the panel reports the *hardest* one. Being
+told "you stopped it" is more useful than "wait 90 seconds" when the STOP file
+is the real reason.
+
+### You can see it beating
+
+The panel shows what the heartbeat did on its last wake-up: held (and why),
+checked with nothing to do, or ran with a count of actions. A background loop
+you can't observe is indistinguishable from one that's broken.
+
+You can still trigger a cycle yourself from the panel at any time.
