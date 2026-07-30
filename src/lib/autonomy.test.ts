@@ -11,6 +11,7 @@ describe("haltText", () => {
     expect(haltText({ reason: "env_var" })).toContain("JARVIS_AUTONOMY");
     expect(haltText({ reason: "disabled" })).toContain("off");
     expect(haltText({ reason: "too_soon", wait_secs: 45 })).toContain("45s");
+    expect(haltText({ reason: "already_running" })).toContain("already running");
   });
 
   it("explains being busy as deferral, not as a failure", () => {
@@ -51,6 +52,16 @@ describe("beatText", () => {
     expect(beatText({ at, beat: { outcome: "idle" } }, now)).toBe(
       "checked 2 min ago · nothing to do",
     );
+  });
+
+  it("passes through a racing refusal verbatim", () => {
+    // The Rust side can't map an error string back to a Halt, so it sends the
+    // message. Rewording it here would be inventing a reason.
+    const text = beatText(
+      { at, beat: { outcome: "refused", why: "a cycle is already running" } },
+      now,
+    );
+    expect(text).toBe("held 2 min ago · a cycle is already running");
   });
 
   it("reports why a beat was held", () => {

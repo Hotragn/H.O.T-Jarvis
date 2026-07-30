@@ -377,11 +377,13 @@ export type Halt =
   | { reason: "env_var" }
   | { reason: "disabled" }
   | { reason: "too_soon"; wait_secs: number }
-  | { reason: "busy"; wait_secs: number };
+  | { reason: "busy"; wait_secs: number }
+  | { reason: "already_running" };
 
 /// What the background heartbeat did on its last wake-up.
 export type Beat =
   | { outcome: "held"; halt: Halt }
+  | { outcome: "refused"; why: string }
   | { outcome: "idle" }
   | { outcome: "ran"; actions: number };
 

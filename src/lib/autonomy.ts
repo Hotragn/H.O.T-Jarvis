@@ -12,6 +12,8 @@ export function haltText(halt: Halt): string {
       return "Auto mode is off.";
     case "too_soon":
       return `Rate-limited — next cycle in ${halt.wait_secs}s.`;
+    case "already_running":
+      return "A cycle is already running.";
     case "busy":
       return `You're using the app — unattended work waits ${halt.wait_secs}s.`;
   }
@@ -36,6 +38,8 @@ export function beatText(
   switch (last.beat.outcome) {
     case "held":
       return `held ${ago(last.at, nowMs)} · ${haltText(last.beat.halt).toLowerCase()}`;
+    case "refused":
+      return `held ${ago(last.at, nowMs)} · ${last.beat.why}`;
     case "idle":
       return `checked ${ago(last.at, nowMs)} · nothing to do`;
     case "ran":

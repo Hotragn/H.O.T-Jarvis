@@ -97,6 +97,17 @@ If several gates are closed at once, the panel reports the *hardest* one. Being
 told "you stopped it" is more useful than "wait 90 seconds" when the STOP file
 is the real reason.
 
+### Only one cycle at a time
+
+The cycle gap is recorded when a cycle *finishes*, so while one is mid-flight the
+rate limit still reads as satisfied. Without something else, pressing **Run one
+cycle** during a heartbeat cycle would start a second one that passed every gate
+and, between them, spent twice the caps.
+
+A latch prevents that: whichever started first holds it, and the other is told a
+cycle is already running. It releases when the cycle ends, including if the cycle
+fails partway.
+
 ### You can see it beating
 
 The panel shows what the heartbeat did on its last wake-up: held (and why),

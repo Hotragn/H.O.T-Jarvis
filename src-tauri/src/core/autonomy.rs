@@ -18,6 +18,7 @@
 //! kill-switch file are passed in, which is what makes the policy testable.
 
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 // --- 1. What the autonomous loop is allowed to do at all ---
 
@@ -215,6 +216,11 @@ pub enum Halt {
     TooSoon { wait_secs: i64 },
     /// The user is actively using the app; unattended work waits.
     Busy { wait_secs: i64 },
+    /// A cycle is already in flight. The gaps between cycles are enforced by
+    /// `last_cycle_at`, which is only written when a cycle *finishes* — so
+    /// without this, a second cycle starting mid-flight would pass every gate
+    /// and quietly double the caps.
+    AlreadyRunning,
 }
 
 /// Reads the env var into a decision. Anything other than an explicit on-ish
@@ -283,6 +289,54 @@ pub fn heartbeat_poll_secs(caps: &Caps) -> u64 {
     quarter.clamp(5, 60)
 }
 
+/// A one-at-a-time latch around cycle execution.
+///
+/// `may_start` alone can't provide this: the cycle gap keys off `last_cycle_at`,
+/// which is only written when a cycle finishes, so two callers checking the gate
+/// while a third cycle is mid-flight would both be told yes. The heartbeat and
+/// the manual "Run one cycle" button are exactly those two callers.
+///
+/// Release is on `Drop`, so an early return or a panic inside a cycle can't
+/// wedge auto mode in a permanently-busy state.
+#[derive(Debug, Default)]
+pub struct CycleGate {
+    running: AtomicBool,
+}
+
+impl CycleGate {
+    pub const fn new() -> Self {
+        Self {
+            running: AtomicBool::new(false),
+        }
+    }
+
+    /// Takes the latch, or reports why not. The returned guard releases it.
+    pub fn enter(&self) -> Result<CycleGuard<'_>, Halt> {
+        self.running
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map(|_| CycleGuard { gate: self })
+            .map_err(|_| Halt::AlreadyRunning)
+    }
+
+    /// Whether a cycle is in flight. For reporting only: acting on this would
+    /// reintroduce the race that `enter` exists to close.
+    pub fn is_running(&self) -> bool {
+        self.running.load(Ordering::Acquire)
+    }
+}
+
+/// Holds the latch for as long as a cycle is running.
+#[derive(Debug)]
+pub struct CycleGuard<'a> {
+    gate: &'a CycleGate,
+}
+
+impl Drop for CycleGuard<'_> {
+    fn drop(&mut self) {
+        self.gate.running.store(false, Ordering::Release);
+    }
+}
+
 /// What the heartbeat did on one wake-up, for the UI and the log. A heartbeat
 /// that runs invisibly is indistinguishable from one that is broken.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -290,6 +344,10 @@ pub fn heartbeat_poll_secs(caps: &Caps) -> u64 {
 pub enum Beat {
     /// A gate refused; nothing happened.
     Held { halt: Halt },
+    /// Gates passed on the check, then the cycle itself refused — the STOP file
+    /// appeared mid-wake, or another cycle took the latch first. Carries the
+    /// message rather than a guessed reason: inventing one would misreport it.
+    Refused { why: String },
     /// Gates passed but the planner had nothing worth doing.
     Idle,
     /// A cycle ran.
@@ -662,6 +720,13 @@ mod tests {
         assert!(serde_json::to_string(&Beat::Ran { actions: 2 })
             .unwrap()
             .contains("\"actions\":2"));
+        // A racing refusal carries the real message rather than a guessed gate.
+        let refused = serde_json::to_string(&Beat::Refused {
+            why: "a cycle is already running".into(),
+        })
+        .unwrap();
+        assert!(refused.contains("\"outcome\":\"refused\""), "{refused}");
+        assert!(refused.contains("already running"), "{refused}");
     }
 
     #[test]
@@ -672,6 +737,65 @@ mod tests {
             r#"{"max_actions":3,"max_tool_calls":6,"max_seconds":120,"min_cycle_gap_secs":900}"#;
         let caps: Caps = serde_json::from_str(legacy).unwrap();
         assert_eq!(caps.min_idle_secs, 120, "falls back to the default");
+    }
+
+    // --- one cycle at a time ---
+
+    #[test]
+    fn a_second_cycle_cannot_start_while_one_is_in_flight() {
+        // The cycle gap is written when a cycle *finishes*, so mid-flight the
+        // rate limit still reads as satisfied. Without this latch the heartbeat
+        // and the manual button would both be told yes and double the caps.
+        let gate = CycleGate::new();
+        let held = gate.enter().expect("first caller takes it");
+        assert_eq!(gate.enter().unwrap_err(), Halt::AlreadyRunning);
+        assert!(gate.is_running());
+        drop(held);
+        assert!(!gate.is_running());
+        assert!(gate.enter().is_ok(), "released once the cycle ended");
+    }
+
+    #[test]
+    fn the_latch_is_released_even_if_a_cycle_unwinds() {
+        // A panic mid-cycle must not wedge auto mode as permanently busy.
+        let gate = CycleGate::new();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _held = gate.enter().unwrap();
+            panic!("a cycle blew up");
+        }));
+        assert!(!gate.is_running());
+        assert!(gate.enter().is_ok());
+    }
+
+    #[test]
+    fn only_one_of_many_racing_callers_gets_in() {
+        let gate = std::sync::Arc::new(CycleGate::new());
+        let winners = std::sync::Arc::new(AtomicBool::new(false));
+        let mut doubled = false;
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    let gate = gate.clone();
+                    let winners = winners.clone();
+                    scope.spawn(move || match gate.enter() {
+                        Ok(guard) => {
+                            // If a second thread is ever inside here at the same
+                            // time, this swap sees `true` and the test fails.
+                            let clash = winners.swap(true, Ordering::AcqRel);
+                            std::thread::sleep(std::time::Duration::from_millis(5));
+                            winners.store(false, Ordering::Release);
+                            drop(guard);
+                            clash
+                        }
+                        Err(_) => false,
+                    })
+                })
+                .collect();
+            for h in handles {
+                doubled |= h.join().unwrap();
+            }
+        });
+        assert!(!doubled, "two cycles were inside the latch at once");
     }
 
     // --- caps ---
