@@ -1,6 +1,15 @@
-/* H.O.T-Jarvis docs theme — a Vercel-like dark-first surface in the product's
-   instrument palette (near-black steel, cyan accent, mint for "ready" states).
-   Built on Starlight's CSS-variable system so upgrades stay clean. */
+/* H.O.T-Jarvis docs theme.
+ *
+ * Goal: the docs should read as the same product as the app and the landing
+ * page, not as "a docs site for it". So this ports the instrument language the
+ * rest of the project already uses — near-black steel, a faint engineering
+ * grid, a cyan radial glow, mono eyebrows, cyan accent with mint for "ready" —
+ * rather than restyling Starlight arbitrarily.
+ *
+ * Everything is layered on Starlight's CSS variables and on stable, semantic
+ * selectors (`[aria-current]`, `[data-theme]`, documented component classes) so
+ * a Starlight upgrade can't quietly break the design.
+ */
 
 @import "@fontsource-variable/inter";
 @import "@fontsource-variable/jetbrains-mono";
@@ -9,20 +18,34 @@
   --sl-font: "Inter Variable", "Inter", system-ui, sans-serif;
   --sl-font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
 
-  /* Brand accent (cyan) mapped to Starlight's accent scale */
+  /* Brand accent (cyan) mapped onto Starlight's accent scale. */
   --sl-color-accent-low: #0b3a4d;
   --sl-color-accent: #2aa8e0;
   --sl-color-accent-high: #9fe4fb;
-
-  --hj-mint: #56dfb4;
   --sl-color-text-accent: #7fe7ff;
+
+  /* Project tokens, matching the app's tokens.css so the two never drift. */
+  --hj-accent: #38c6f4;
+  --hj-mint: #56dfb4;
+  --hj-warn: #f0b23e;
+  --hj-line: rgba(129, 190, 232, 0.16);
+  --hj-line-strong: rgba(129, 190, 232, 0.34);
+
+  /* Motion, shared so every transition feels like one system. */
+  --hj-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --hj-quick: 0.18s;
+  --hj-med: 0.32s;
+
+  /* Readable measure. Starlight's default content column runs wide on big
+     screens, which is the single biggest "unpolished" tell in technical docs. */
+  --sl-content-width: 47rem;
 }
 
-/* Dark theme (default): deep steel, subtle borders, high-contrast code */
+/* Dark (default): deep steel with real depth. */
 :root[data-theme="dark"] {
   --sl-color-bg: #04070d;
-  --sl-color-bg-nav: rgba(4, 7, 13, 0.82);
-  --sl-color-bg-sidebar: #060b15;
+  --sl-color-bg-nav: rgba(4, 7, 13, 0.72);
+  --sl-color-bg-sidebar: transparent;
   --sl-color-bg-inline-code: #0d1826;
   --sl-color-hairline: rgba(129, 190, 232, 0.12);
   --sl-color-hairline-light: rgba(129, 190, 232, 0.16);
@@ -30,47 +53,368 @@
   --sl-color-gray-5: #0d1826;
   --sl-color-white: #eaf3fb;
   --astro-code-background: #060d17;
+  --hj-panel: rgba(129, 190, 232, 0.05);
 }
 
-/* Light theme: same accent, clean paper */
+/* Light: same accent, clean paper — parity, not an afterthought. */
 :root[data-theme="light"] {
   --sl-color-accent-low: #d7f0fb;
   --sl-color-accent: #0e7fae;
   --sl-color-accent-high: #06344a;
   --sl-color-text-accent: #0e7fae;
+  --hj-accent: #0e7fae;
+  --hj-mint: #0f7a5e;
+  --hj-line: rgba(16, 42, 66, 0.16);
+  --hj-line-strong: rgba(16, 42, 66, 0.32);
+  --hj-panel: rgba(16, 42, 66, 0.04);
 }
 
-/* Frosted, bordered top nav — the premium touch */
+/* --- the surface: glow + engineering grid, exactly as the app draws it --- */
+body {
+  background-attachment: fixed;
+  background-image:
+    radial-gradient(900px 520px at 50% -8%, rgba(38, 142, 191, 0.13), transparent 62%),
+    repeating-linear-gradient(0deg, transparent 0 47px, var(--hj-panel) 47px 48px),
+    repeating-linear-gradient(90deg, transparent 0 47px, var(--hj-panel) 47px 48px);
+}
+
+:root[data-theme="light"] body {
+  background-image:
+    radial-gradient(900px 520px at 50% -8%, rgba(14, 127, 174, 0.09), transparent 62%),
+    repeating-linear-gradient(0deg, transparent 0 47px, var(--hj-panel) 47px 48px),
+    repeating-linear-gradient(90deg, transparent 0 47px, var(--hj-panel) 47px 48px);
+}
+
+/* --- typography: tighter headings, clearer hierarchy --- */
+.sl-markdown-content {
+  font-size: var(--sl-text-body);
+  line-height: 1.72;
+}
+
+.sl-markdown-content :is(h1, h2, h3, h4) {
+  letter-spacing: -0.018em;
+  font-weight: 500;
+}
+
+.sl-markdown-content h1 {
+  letter-spacing: -0.028em;
+}
+
+/* A hairline under h2 turns a long page into scannable sections. */
+.sl-markdown-content h2 {
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--hj-line);
+}
+
+/* Heading anchors: present, but only on hover — discoverable, not noisy. */
+.sl-markdown-content :is(h2, h3, h4) > a {
+  text-decoration: none;
+}
+
+.sl-markdown-content :is(h2, h3, h4) .sl-anchor-link {
+  opacity: 0;
+  transition: opacity var(--hj-quick) var(--hj-ease);
+}
+
+.sl-markdown-content :is(h2, h3, h4):hover .sl-anchor-link,
+.sl-markdown-content .sl-anchor-link:focus-visible {
+  opacity: 1;
+}
+
+/* Body links: underline that thickens, rather than a colour-only cue. */
+.sl-markdown-content a:not(.sl-link-card, .action, .sl-anchor-link) {
+  text-underline-offset: 0.22em;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in srgb, var(--hj-accent) 45%, transparent);
+  transition: text-decoration-color var(--hj-quick) var(--hj-ease);
+}
+
+.sl-markdown-content a:not(.sl-link-card, .action, .sl-anchor-link):hover {
+  text-decoration-color: var(--hj-accent);
+}
+
+/* --- top nav: frosted and bordered --- */
 .header {
-  backdrop-filter: blur(10px);
-  border-bottom: 1px solid var(--sl-color-hairline);
+  backdrop-filter: blur(12px) saturate(140%);
+  border-bottom: 1px solid var(--hj-line);
 }
 
-/* Sidebar link micro-interaction */
-.sidebar a {
-  transition: color 0.15s ease, background-color 0.15s ease, transform 0.15s ease;
-}
-.sidebar a:hover {
-  transform: translateX(2px);
-}
-
-/* The logo mark a touch larger and crisp */
 .site-title img {
   height: 1.9rem;
 }
 
-/* Code blocks: rounded, bordered, generous — Stripe/Vercel feel */
+.site-title {
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
+
+/* --- sidebar: a real instrument nav --- */
+.sidebar-pane {
+  border-inline-end: 1px solid var(--hj-line);
+}
+
+/* Group labels as mono eyebrows — the app's label idiom. */
+.sidebar-content :is(summary, .group-label) span,
+.sidebar-content h2 {
+  font-family: var(--sl-font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  opacity: 0.72;
+}
+
+.sidebar-content a {
+  border-radius: 6px;
+  border-inline-start: 2px solid transparent;
+  transition:
+    color var(--hj-quick) var(--hj-ease),
+    background-color var(--hj-quick) var(--hj-ease),
+    border-color var(--hj-quick) var(--hj-ease);
+}
+
+.sidebar-content a:hover {
+  background: var(--hj-panel);
+}
+
+/* Active page gets the accent rail — same visual grammar as the app's tab
+   underline, so the two surfaces read as one product. */
+.sidebar-content a[aria-current="page"] {
+  background: color-mix(in srgb, var(--hj-accent) 12%, transparent);
+  border-inline-start-color: var(--hj-accent);
+  color: var(--sl-color-white);
+  font-weight: 500;
+}
+
+/* --- right-hand table of contents --- */
+starlight-toc a {
+  border-inline-start: 2px solid transparent;
+  transition: border-color var(--hj-quick) var(--hj-ease), color var(--hj-quick) var(--hj-ease);
+}
+
+starlight-toc a[aria-current="true"] {
+  border-inline-start-color: var(--hj-accent);
+  color: var(--sl-color-white);
+}
+
+/* --- code: the thing readers actually look at --- */
 .expressive-code,
 .sl-markdown-content pre {
   border-radius: 12px;
 }
+
 .sl-markdown-content pre {
-  border: 1px solid var(--sl-color-hairline);
+  border: 1px solid var(--hj-line);
 }
 
-/* Respect reduced motion */
+.expressive-code .frame {
+  border-radius: 12px;
+  border: 1px solid var(--hj-line);
+  overflow: hidden;
+}
+
+/* Terminal frames get a subtly warmer border, so "run this" reads differently
+   from "read this". */
+.expressive-code .frame.is-terminal {
+  border-color: color-mix(in srgb, var(--hj-mint) 32%, transparent);
+}
+
+.sl-markdown-content :not(pre) > code {
+  border: 1px solid var(--hj-line);
+  border-radius: 5px;
+  padding: 0.12em 0.36em;
+  font-size: 0.88em;
+}
+
+/* --- cards and link cards: designed, with a real hover --- */
+.sl-link-card,
+.card {
+  border: 1px solid var(--hj-line);
+  border-radius: 12px;
+  background: var(--hj-panel);
+  transition:
+    border-color var(--hj-med) var(--hj-ease),
+    transform var(--hj-med) var(--hj-ease),
+    box-shadow var(--hj-med) var(--hj-ease);
+}
+
+.sl-link-card:hover,
+.card:hover {
+  border-color: var(--hj-line-strong);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 30px -18px rgba(0, 0, 0, 0.7);
+}
+
+.sl-link-card .title {
+  color: var(--sl-color-white);
+}
+
+.card .title {
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+/* --- asides / callouts: branded, not default blue --- */
+.starlight-aside {
+  border-inline-start-width: 2px;
+  border-radius: 0 8px 8px 0;
+  background: var(--hj-panel);
+}
+
+.starlight-aside--tip {
+  --sl-color-asides-text-accent: var(--hj-mint);
+  border-inline-start-color: var(--hj-mint);
+}
+
+.starlight-aside--note {
+  --sl-color-asides-text-accent: var(--hj-accent);
+  border-inline-start-color: var(--hj-accent);
+}
+
+.starlight-aside--caution {
+  --sl-color-asides-text-accent: var(--hj-warn);
+  border-inline-start-color: var(--hj-warn);
+}
+
+.starlight-aside__title {
+  font-family: var(--sl-font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+/* --- tables: read like engineering output --- */
+.sl-markdown-content table {
+  border: 1px solid var(--hj-line);
+  border-radius: 10px;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  font-size: 0.94em;
+}
+
+.sl-markdown-content :is(th, td) {
+  border: 0;
+  border-bottom: 1px solid var(--hj-line);
+  padding: 0.6em 0.85em;
+}
+
+.sl-markdown-content th {
+  background: var(--hj-panel);
+  font-family: var(--sl-font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  font-weight: 400;
+  text-align: start;
+}
+
+.sl-markdown-content tr:last-child td {
+  border-bottom: 0;
+}
+
+/* --- splash hero: give the mark presence instead of a floating logo --- */
+.hero img,
+.hero svg {
+  filter: drop-shadow(0 0 42px color-mix(in srgb, var(--hj-accent) 34%, transparent));
+}
+
+.hero h1 {
+  letter-spacing: -0.032em;
+}
+
+/* The tagline reads as the product's voice, not a subtitle. */
+.hero .tagline {
+  max-width: 42rem;
+  line-height: 1.6;
+}
+
+.hero .actions .action.primary {
+  border: 1px solid transparent;
+  box-shadow: 0 0 24px -6px color-mix(in srgb, var(--hj-accent) 55%, transparent);
+  transition: transform var(--hj-quick) var(--hj-ease), box-shadow var(--hj-med) var(--hj-ease);
+}
+
+.hero .actions .action.primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 34px -4px color-mix(in srgb, var(--hj-accent) 70%, transparent);
+}
+
+.hero .actions .action.minimal {
+  border: 1px solid var(--hj-line);
+  transition: border-color var(--hj-quick) var(--hj-ease);
+}
+
+.hero .actions .action.minimal:hover {
+  border-color: var(--hj-line-strong);
+}
+
+/* --- small details that read as care --- */
+::selection {
+  background: color-mix(in srgb, var(--hj-accent) 30%, transparent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--hj-accent);
+  outline-offset: 2px;
+}
+
+/* Pagination (prev/next) as bordered panels rather than bare links. */
+.pagination-links a {
+  border: 1px solid var(--hj-line);
+  border-radius: 12px;
+  background: var(--hj-panel);
+  transition: border-color var(--hj-quick) var(--hj-ease), transform var(--hj-quick) var(--hj-ease);
+}
+
+.pagination-links a:hover {
+  border-color: var(--hj-line-strong);
+  transform: translateY(-1px);
+}
+
+/* Thin scrollbars, so long pages don't grow a chunky grey bar. */
+@supports (scrollbar-width: thin) {
+  * {
+    scrollbar-width: thin;
+  }
+}
+
+/* --- honour reduced motion: every transform and transition above --- */
 @media (prefers-reduced-motion: reduce) {
-  .sidebar a:hover {
+  .sidebar-content a,
+  .sl-link-card,
+  .card,
+  .pagination-links a,
+  .hero .actions .action.primary,
+  .hero .actions .action.minimal,
+  starlight-toc a,
+  .sl-markdown-content .sl-anchor-link {
+    transition: none;
+  }
+
+  .sl-link-card:hover,
+  .card:hover,
+  .pagination-links a:hover,
+  .hero .actions .action.primary:hover {
     transform: none;
+  }
+
+  /* The fixed background is decorative; drop the parallax-ish attachment. */
+  body {
+    background-attachment: scroll;
+  }
+}
+
+/* --- narrow screens: the grid and glow get in the way on a phone --- */
+@media (max-width: 50rem) {
+  body {
+    background-image: radial-gradient(
+      600px 320px at 50% -10%,
+      rgba(38, 142, 191, 0.12),
+      transparent 60%
+    );
+  }
+
+  .sl-markdown-content h2 {
+    border-bottom-color: transparent;
   }
 }
