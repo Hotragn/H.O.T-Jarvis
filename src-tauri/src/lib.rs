@@ -47,6 +47,18 @@ struct AppState {
     transcriber: Mutex<Option<crate::core::whisper::WhisperTranscriber>>,
 }
 
+/// The live calibration report, rebuilt from the event log. Cheap enough to do
+/// per chat turn at personal-history scale, and always current.
+fn current_calibration(state: &AppState) -> crate::core::calibration::CalibrationReport {
+    let events = state
+        .events
+        .lock()
+        .ok()
+        .and_then(|log| log.tail(usize::MAX / 2).ok())
+        .unwrap_or_default();
+    crate::core::calibration::report(&crate::core::calibration::pair_from_events(&events))
+}
+
 /// Wall-clock seconds, for scoring lesson age.
 fn now_unix() -> i64 {
     std::time::SystemTime::now()
@@ -182,6 +194,14 @@ async fn chat_send(state: tauri::State<'_, AppState>, text: String) -> Result<Ch
         recent = mem.recent_messages(20).map_err(|e| e.to_string())?;
     }
 
+    // Confidence v2: tell the model what its own record says, so it can correct
+    // a measured bias instead of repeating it.
+    let calibration = current_calibration(&state);
+    let base_system = format!(
+        "{base_system}{}",
+        crate::core::confidence::bias_instruction(&calibration)
+    );
+
     // Semantic recall: fish the archive for moments the recent window has
     // already forgotten. Strictly best-effort — no embedding model means no
     // recall, never an error — and local-only (embeddings never leave for a
@@ -236,6 +256,10 @@ async fn chat_send(state: tauri::State<'_, AppState>, text: String) -> Result<Ch
             let (cleaned, confidence) = extract_confidence(&reply.content);
             reply.content = cleaned;
             reply.confidence = confidence;
+            // Re-read the stated number through the calibration record: an
+            // answer claiming 85 from a model that runs 30 points hot is not
+            // an 85, and the user should know before acting on it.
+            reply.trust = crate::core::confidence::assess(confidence, &calibration);
             let assistant_msg_id = {
                 let mem = state.memory.lock().map_err(|e| e.to_string())?;
                 mem.append_message("assistant", &reply.content)
@@ -426,9 +450,13 @@ async fn author_skill(
     let mut saved: Option<SkillManifest> = None;
 
     for attempt in 1..=MAX_ATTEMPTS {
+        // Structured output: constrain the reply to the skill schema so the
+        // model cannot emit fences or prose. This removes the "reply wasn't
+        // JSON" failure class rather than recovering from it, which is what
+        // leaves the retries for real logic mistakes.
         let reply = state
             .router
-            .chat(&conversation)
+            .chat_json(&conversation, &crate::core::authoring::skill_schema())
             .await
             .map_err(|e| e.to_string())?;
         conversation.push(ChatMessage {

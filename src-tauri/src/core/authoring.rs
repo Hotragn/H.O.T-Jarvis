@@ -50,12 +50,102 @@ pub fn authoring_messages(request: &str, lessons: &[String]) -> Vec<ChatMessage>
     ]
 }
 
-/// Follow-up when a draft failed its test or couldn't be parsed.
+/// JSON schema for a skill draft, handed to Ollama's structured-output `format`
+/// field. Constrained decoding beats asking politely: the model *cannot* emit
+/// prose, fences, or a missing key, which removes the whole class of "reply
+/// wasn't JSON" retries rather than recovering from them.
+pub fn skill_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "object",
+        "properties": {
+            "name": { "type": "string" },
+            "description": { "type": "string" },
+            "code": { "type": "string" },
+            "test": { "type": "string" }
+        },
+        "required": ["name", "description", "code", "test"]
+    })
+}
+
+/// Why a draft failed. Classifying it is what lets a retry carry a *targeted*
+/// counter-example instead of repeating the same generic rules — the failure
+/// modes here are few and highly repetitive, so a specific example is worth far
+/// more than another paragraph of instructions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailureClass {
+    /// Reply wasn't parseable JSON in the required shape.
+    NotJson,
+    /// `${...}` string interpolation — the most common Rhai mistake by far.
+    Interpolation,
+    /// Missing `fn run(input)`.
+    NoRun,
+    /// Missing `fn test()`.
+    NoTest,
+    /// Didn't compile, or threw at runtime.
+    Broken,
+    /// Ran fine, but `test()` returned false.
+    TestFailed,
+}
+
+/// Best-effort classification from the failure text the engine produced. Order
+/// matters: the most specific and most actionable signals win.
+pub fn classify_failure(failure: &str) -> FailureClass {
+    let f = failure.to_lowercase();
+    if f.contains("${") || f.contains("interpolation") {
+        FailureClass::Interpolation
+    } else if f.contains("must define fn run") {
+        FailureClass::NoRun
+    } else if f.contains("must define fn test") {
+        FailureClass::NoTest
+    } else if f.contains("not a valid json") || f.contains("missing a name") {
+        FailureClass::NotJson
+    } else if f.contains("returned false") || f.contains("test failed") {
+        FailureClass::TestFailed
+    } else {
+        FailureClass::Broken
+    }
+}
+
+/// A short, concrete correction per failure class.
+pub fn failure_hint(class: FailureClass) -> &'static str {
+    match class {
+        FailureClass::NotJson => {
+            "Reply with the JSON object ONLY — no prose, no markdown fences, no \
+             trailing explanation. All four keys are required."
+        }
+        FailureClass::Interpolation => {
+            "You used ${...} interpolation, which does not exist in Rhai. Build \
+             strings with +. WRONG: \"Hello ${name}\"  RIGHT: \"Hello \" + name"
+        }
+        FailureClass::NoRun => {
+            "The \"code\" value must define exactly fn run(input). Example: \
+             \"fn run(input) { input.trim() }\""
+        }
+        FailureClass::NoTest => {
+            "The \"test\" value must define fn test() and call run() with a \
+             concrete example."
+        }
+        FailureClass::Broken => {
+            "The script did not run. Keep to plain Rhai: let bindings, if/else, \
+             for loops, string methods (.len(), .trim(), .to_upper(), .split(s), \
+             .sub_string(start, len)). No imports, no files, no network."
+        }
+        FailureClass::TestFailed => {
+            "The script ran but test() returned false, so run() and the expected \
+             value disagree. Trace your example by hand and fix whichever is \
+             wrong — the LAST EXPRESSION is the return value, no `return` needed."
+        }
+    }
+}
+
+/// Follow-up when a draft failed its test or couldn't be parsed. Carries a
+/// class-specific counter-example, not just the raw error.
 pub fn refinement_message(failure: &str) -> ChatMessage {
+    let hint = failure_hint(classify_failure(failure));
     ChatMessage {
         role: "user".into(),
         content: format!(
-            "That attempt failed: {failure}\nFix it and reply again with ONLY the corrected JSON object in the same shape."
+            "That attempt failed: {failure}\n\n{hint}\n\nFix it and reply again with ONLY the corrected JSON object in the same shape."
         ),
     }
 }
@@ -103,6 +193,95 @@ mod tests {
     use super::*;
 
     const GOOD_JSON: &str = r#"{"name": "shout", "description": "uppercases input", "code": "fn run(input) { input.to_upper() }", "test": "fn test() { run(\"hi\") == \"HI\" }"}"#;
+
+    #[test]
+    fn schema_requires_all_four_keys_and_only_strings() {
+        let schema = skill_schema();
+        assert_eq!(schema["type"], "object");
+        let required: Vec<&str> = schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        for key in ["name", "description", "code", "test"] {
+            assert!(required.contains(&key), "{key} must be required");
+            assert_eq!(schema["properties"][key]["type"], "string");
+        }
+    }
+
+    #[test]
+    fn interpolation_is_the_first_thing_we_look_for() {
+        // The most common Rhai mistake, and the one a generic hint never fixes.
+        assert_eq!(
+            classify_failure("script error: ${name} is not valid"),
+            FailureClass::Interpolation
+        );
+        assert_eq!(
+            classify_failure("avoid interpolation in strings"),
+            FailureClass::Interpolation
+        );
+        assert!(failure_hint(FailureClass::Interpolation).contains("RIGHT:"));
+    }
+
+    #[test]
+    fn structural_failures_beat_the_generic_json_message() {
+        // The engine's "must define fn run" is more specific than any JSON
+        // complaint, so it has to win even when both words appear.
+        assert_eq!(
+            classify_failure("code must define fn run(input)"),
+            FailureClass::NoRun
+        );
+        assert_eq!(
+            classify_failure("test must define fn test()"),
+            FailureClass::NoTest
+        );
+        assert_eq!(
+            classify_failure("reply was not a valid JSON object with name/description/code/test"),
+            FailureClass::NotJson
+        );
+    }
+
+    #[test]
+    fn a_failing_test_is_distinguished_from_a_broken_script() {
+        assert_eq!(
+            classify_failure("test() returned false"),
+            FailureClass::TestFailed
+        );
+        assert_eq!(
+            classify_failure("Runtime error: unknown function 'frobnicate'"),
+            FailureClass::Broken
+        );
+        // The two need different advice, which is the whole point.
+        assert_ne!(
+            failure_hint(FailureClass::TestFailed),
+            failure_hint(FailureClass::Broken)
+        );
+    }
+
+    #[test]
+    fn every_class_has_a_distinct_non_empty_hint() {
+        use FailureClass::*;
+        let all = [NotJson, Interpolation, NoRun, NoTest, Broken, TestFailed];
+        let hints: Vec<&str> = all.iter().map(|c| failure_hint(*c)).collect();
+        assert!(hints.iter().all(|h| h.len() > 20));
+        for (i, a) in hints.iter().enumerate() {
+            for b in hints.iter().skip(i + 1) {
+                assert_ne!(a, b, "hints must be class-specific");
+            }
+        }
+    }
+
+    #[test]
+    fn refinement_carries_both_the_error_and_a_targeted_hint() {
+        let msg = refinement_message("script error: ${x} invalid");
+        assert!(msg.content.contains("${x} invalid"), "keeps the raw error");
+        assert!(
+            msg.content.contains("does not exist in Rhai"),
+            "adds the interpolation counter-example"
+        );
+        assert!(msg.content.contains("ONLY the corrected JSON"));
+    }
 
     #[test]
     fn parses_a_clean_json_reply() {
