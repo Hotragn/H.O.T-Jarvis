@@ -73,6 +73,36 @@ rather than inventing a sentence. That is deliberate: Whisper is known to
 hallucinate filler like "thank you" on silence, and putting words in your mouth
 is worse than admitting it heard nothing.
 
+## Hands-free (Voice v2)
+
+Once the model is downloaded, the header shows a **hands-free** toggle. Turn it
+on and you never touch the machine again:
+
+1. Say **"hey jarvis"** — the phrase is matched tolerantly, so "hay jarvis" and
+   a mis-heard "jarvus" still work.
+2. Ask in the same breath ("hey jarvis, what time is it") or wait for
+   "Listening." and then ask.
+3. After the answer there's an **8-second follow-up window** where you can just
+   keep talking — no wake phrase needed. It shows a countdown, then goes back to
+   waiting for the phrase.
+
+Say **"stop listening"**, "never mind", or "that's all" to end the session by
+voice.
+
+The badge tells you exactly what the microphone is doing, because that's a
+privacy question, not a UI detail:
+
+| Badge | Meaning |
+|-------|---------|
+| `hands-free` | off — mic closed |
+| `armed` (mint) | on, listening only for the wake phrase |
+| `listening` (cyan, pulsing) | mic open, capturing you |
+| `thinking` | mic closed, model working |
+| `speaking` | mic closed — it never transcribes its own voice |
+
+You can change the wake phrase; it must be at least two words, because
+one-word phrases trigger constantly in ordinary speech.
+
 ## What it does to your audio
 
 Before transcription, the take is conditioned locally:

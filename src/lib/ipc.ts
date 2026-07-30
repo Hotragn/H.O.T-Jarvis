@@ -345,6 +345,72 @@ export async function setProviderSettings(s: ProviderSettings): Promise<boolean>
   });
 }
 
+// --- Voice v2: wake word + hands-free conversation ---
+
+export type VoicePhase =
+  | "off"
+  | "waiting"
+  | "listening"
+  | "thinking"
+  | "speaking"
+  | "follow_up";
+
+export interface VoiceSession {
+  phase: VoicePhase;
+  wake_phrase: string;
+  /// Whether the mic should be open right now. The UI mirrors this rather than
+  /// deciding for itself — the policy lives in the tested Rust core.
+  wants_audio: boolean;
+  needs_wake: boolean;
+  follow_up_remaining_ms: number;
+}
+
+export type VoiceAction =
+  | { action: "idle" }
+  | { action: "ask"; text: string }
+  | { action: "say"; text: string }
+  | { action: "sleep" };
+
+export interface VoiceHeard {
+  action: VoiceAction;
+  session: VoiceSession;
+}
+
+export async function voiceSession(): Promise<VoiceSession | null> {
+  if (!inTauri) return null;
+  return invoke<VoiceSession>("voice_session");
+}
+
+export async function voiceHandsFree(on: boolean): Promise<VoiceSession> {
+  if (!inTauri) throw new Error("No backend in the browser preview.");
+  return invoke<VoiceSession>("voice_hands_free", { on });
+}
+
+export async function voiceSetWakePhrase(phrase: string): Promise<VoiceSession> {
+  if (!inTauri) throw new Error("No backend in the browser preview.");
+  return invoke<VoiceSession>("voice_set_wake_phrase", { phrase });
+}
+
+export async function voiceHeard(transcript: string, durationMs: number): Promise<VoiceHeard> {
+  if (!inTauri) throw new Error("No backend in the browser preview.");
+  return invoke<VoiceHeard>("voice_heard", { transcript, durationMs });
+}
+
+export type VoiceEvent =
+  | "answered_speaking"
+  | "answered_silent"
+  | "finished_speaking"
+  | "failed"
+  | "tick";
+
+export async function voiceAdvance(
+  event: VoiceEvent,
+  elapsedMs?: number,
+): Promise<VoiceSession> {
+  if (!inTauri) throw new Error("No backend in the browser preview.");
+  return invoke<VoiceSession>("voice_advance", { event, elapsedMs });
+}
+
 // --- Confidence v1: calibration tracking ---
 
 export interface CalibrationBin {
@@ -416,6 +482,21 @@ export async function sttStart(): Promise<SttFormat> {
 export async function sttStop(): Promise<string> {
   if (!inTauri) throw new Error("No backend in the browser preview.");
   return invoke<string>("stt_stop");
+}
+
+export interface SttHeard {
+  transcript: string;
+  duration_ms: number;
+}
+
+/// Hands-free capture: listens until the speaker stops, then transcribes.
+/// An empty transcript means the window passed in silence — loop again.
+export async function sttListen(
+  maxWaitMs = 6000,
+  maxUtteranceMs = 15000,
+): Promise<SttHeard> {
+  if (!inTauri) throw new Error("No backend in the browser preview.");
+  return invoke<SttHeard>("stt_listen", { maxWaitMs, maxUtteranceMs });
 }
 
 export async function sttCancel(): Promise<void> {
