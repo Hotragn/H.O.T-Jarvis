@@ -634,7 +634,12 @@ async fn run_reflection(state: &AppState) -> Result<Vec<Insight>, String> {
     log_event(
         state,
         "memory.reflected",
-        serde_json::json!({ "insights": stored.len(), "events_digested": fresh.len() }),
+        serde_json::json!({
+            "insights": stored.len(),
+            "events_digested": fresh.len(),
+            // Ids make the pass replayable and undoable, rather than just counted.
+            "insight_ids": stored.iter().map(|i| i.id).collect::<Vec<_>>(),
+        }),
     );
     Ok(stored)
 }
@@ -707,6 +712,32 @@ fn undo_event(state: tauri::State<'_, AppState>, event_id: u64) -> Result<String
                 serde_json::json!({ "undoes": event.id, "msg_id": msg_id }),
             );
             "message removed from memory".to_string()
+        }
+        "memory.reflected" => {
+            // Reverses one reflection pass by dropping exactly the lessons it
+            // created. Older passes logged only a count, so those stay
+            // irreversible and say so.
+            let ids: Vec<i64> = p["insight_ids"]
+                .as_array()
+                .ok_or("this reflection predates undo support")?
+                .iter()
+                .filter_map(|v| v.as_i64())
+                .collect();
+            if ids.is_empty() {
+                return Err("that pass produced no lessons to undo".into());
+            }
+            {
+                let mem = state.memory.lock().map_err(|e| e.to_string())?;
+                for id in &ids {
+                    mem.forget_insight(*id).map_err(|e| e.to_string())?;
+                }
+            }
+            log_event(
+                &state,
+                "undo.reflection",
+                serde_json::json!({ "undoes": event.id, "insight_ids": ids }),
+            );
+            format!("{} lesson(s) from that pass forgotten", ids.len())
         }
         "note.deleted" => {
             let slug = p["slug"].as_str().ok_or("event has no note slug")?;
@@ -1121,10 +1152,100 @@ fn maintain_insights(state: tauri::State<'_, AppState>) -> Result<forgetting::Fo
                 "merged": plan.merges.len(),
                 "kept": plan.kept,
                 "reasons": plan.reasons,
+                "insight_ids": plan.forget.clone(),
             }),
         );
     }
     Ok(plan)
+}
+
+// --- Replay v2: step-through player + state audit (§5.4) ---
+
+/// Every frame of the session player, oldest first.
+#[tauri::command]
+fn replay_timeline(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<crate::core::replay::Step>, String> {
+    let events = {
+        let log = state.events.lock().map_err(|e| e.to_string())?;
+        log.tail(usize::MAX / 2).map_err(|e| e.to_string())?
+    };
+    Ok(crate::core::replay::timeline(&events))
+}
+
+/// The reconstructed world after `steps` events — what the player shows when
+/// you scrub to that point.
+#[tauri::command]
+fn replay_state_at(
+    state: tauri::State<'_, AppState>,
+    steps: usize,
+) -> Result<crate::core::replay::ReplayState, String> {
+    let events = {
+        let log = state.events.lock().map_err(|e| e.to_string())?;
+        log.tail(usize::MAX / 2).map_err(|e| e.to_string())?
+    };
+    Ok(crate::core::replay::state_at(&events, steps))
+}
+
+/// Builds the live world from the real database/filesystem, for comparison.
+fn actual_state(state: &AppState) -> Result<crate::core::replay::ReplayState, String> {
+    use std::collections::BTreeMap;
+    let (messages, insights) = {
+        let mem = state.memory.lock().map_err(|e| e.to_string())?;
+        let messages = mem
+            .recent_messages(usize::MAX / 2)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|m| crate::core::replay::ReplayedMessage {
+                role: m.role,
+                content: m.content,
+            })
+            .collect();
+        let insights = mem
+            .recent_insights(usize::MAX / 2)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|i| i.id)
+            .collect();
+        (messages, insights)
+    };
+    let mut notes = BTreeMap::new();
+    for slug in state.notes.list_notes().map_err(|e| e.to_string())? {
+        // Size from the real file, so it can be compared with the log's count.
+        let chars = state
+            .notes
+            .read_note(&slug)
+            .map(|c| c.chars().count() as u64)
+            .unwrap_or(0);
+        notes.insert(slug, chars);
+    }
+    let skills = state
+        .skills
+        .list_skills()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|m| (m.name, m.version as u64))
+        .collect();
+    Ok(crate::core::replay::ReplayState {
+        messages,
+        notes,
+        skills,
+        insights,
+    })
+}
+
+/// Replay v2 audit: reconcile chat, notes and skills at once.
+#[tauri::command]
+fn replay_audit_state(
+    state: tauri::State<'_, AppState>,
+) -> Result<crate::core::replay::StateReport, String> {
+    let events = {
+        let log = state.events.lock().map_err(|e| e.to_string())?;
+        log.tail(usize::MAX / 2).map_err(|e| e.to_string())?
+    };
+    let replayed = crate::core::replay::state_at(&events, events.len());
+    let actual = actual_state(&state)?;
+    Ok(crate::core::replay::audit_state(&replayed, &actual))
 }
 
 // --- semantic memory: search + backfill (§ memory tier two) ---
@@ -1428,6 +1549,9 @@ pub fn run() {
             set_provider_settings,
             search_memory,
             index_memory,
+            replay_timeline,
+            replay_state_at,
+            replay_audit_state,
             stt_status,
             stt_device,
             stt_download_model,

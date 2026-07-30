@@ -136,6 +136,56 @@ export async function undoEvent(eventId: number): Promise<string> {
   return invoke<string>("undo_event", { eventId });
 }
 
+// --- Replay v2: step-through player + state audit ---
+
+export interface ReplayStep {
+  step: number;
+  event_id: number;
+  kind: string;
+  summary: string;
+  changed: boolean;
+  messages: number;
+  notes: number;
+  skills: number;
+  insights: number;
+}
+
+export interface ReplayState {
+  messages: ReplayedMessage[];
+  notes: Record<string, number>;
+  skills: Record<string, number>;
+  insights: number[];
+}
+
+export interface KeyedDrift {
+  missing: string[];
+  extra: string[];
+  differing: string[];
+}
+
+export interface StateReport {
+  messages: ReplayReport;
+  notes: KeyedDrift;
+  skills: KeyedDrift;
+  deterministic: boolean;
+  summary: string;
+}
+
+export async function replayTimeline(): Promise<ReplayStep[]> {
+  if (!inTauri) return [];
+  return invoke<ReplayStep[]>("replay_timeline");
+}
+
+export async function replayStateAt(steps: number): Promise<ReplayState | null> {
+  if (!inTauri) return null;
+  return invoke<ReplayState>("replay_state_at", { steps });
+}
+
+export async function replayAuditState(): Promise<StateReport | null> {
+  if (!inTauri) return null;
+  return invoke<StateReport>("replay_audit_state");
+}
+
 export async function replayAudit(): Promise<ReplayReport> {
   if (!inTauri) throw new Error("No backend in the browser preview.");
   return invoke<ReplayReport>("replay_audit");

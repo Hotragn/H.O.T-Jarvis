@@ -7,6 +7,7 @@ const REVERSIBLE = new Set([
   "note.deleted",
   "skill.saved",
   "skill.authored",
+  "memory.reflected",
 ]);
 
 export function isReversible(kind: string): boolean {

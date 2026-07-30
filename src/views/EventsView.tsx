@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import SessionPlayer from "../components/SessionPlayer";
 import { eventDomain, summarizeEvent } from "../lib/events";
 import {
   getEvents,
@@ -17,6 +18,7 @@ export default function EventsView() {
   const [report, setReport] = useState<ReplayReport | null>(null);
   const [auditing, setAuditing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [showPlayer, setShowPlayer] = useState(false);
 
   const refresh = useCallback(() => {
     getEvents(300)
@@ -57,15 +59,28 @@ export default function EventsView() {
     <div className="events-view">
       <div className="panel-title-row">
         <span className="panel-title">event log · {events.length} entries</span>
-        <button
-          type="button"
-          className="ghost-btn"
-          disabled={auditing}
-          onClick={() => void doAudit()}
-        >
-          {auditing ? "Auditing…" : "Replay audit"}
-        </button>
+        <span className="editor-actions">
+          <button
+            type="button"
+            className="ghost-btn"
+            data-active={showPlayer}
+            title="step through the session and watch state rebuild"
+            onClick={() => setShowPlayer((v) => !v)}
+          >
+            {showPlayer ? "Hide player" : "Replay session"}
+          </button>
+          <button
+            type="button"
+            className="ghost-btn"
+            disabled={auditing}
+            onClick={() => void doAudit()}
+          >
+            {auditing ? "Auditing…" : "Replay audit"}
+          </button>
+        </span>
       </div>
+
+      {showPlayer && <SessionPlayer />}
 
       {notice && (
         <div className="msg" data-role="system">
