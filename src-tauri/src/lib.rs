@@ -162,6 +162,8 @@ async fn chat_send(state: tauri::State<'_, AppState>, text: String) -> Result<Ch
     if trimmed.is_empty() {
         return Err("empty message".into());
     }
+    // The user is here; unattended work should wait (idle gate, §7).
+    touch_user_activity(&state);
     // Persist the user turn and gather context, releasing the lock before I/O.
     let user_msg_id;
     let base_system;
@@ -925,6 +927,23 @@ fn autonomy_caps(mem: &MemoryStore) -> autonomy::Caps {
         .unwrap_or_default()
 }
 
+/// When the user last did something in the app. Written on chat and voice, read
+/// by the idle gate so unattended work never competes with a live conversation.
+fn last_user_activity(mem: &MemoryStore) -> Option<i64> {
+    mem.get_fact("autonomy.last_user_activity")
+        .ok()
+        .flatten()
+        .and_then(|v| v.parse().ok())
+}
+
+/// Best-effort: a missed activity stamp only makes the loop more cautious, never
+/// less, because a stale (older) stamp reads as "idle for longer".
+fn touch_user_activity(state: &AppState) {
+    if let Ok(mem) = state.memory.lock() {
+        let _ = mem.set_fact("autonomy.last_user_activity", &now_unix().to_string());
+    }
+}
+
 fn last_cycle_at(mem: &MemoryStore) -> Option<i64> {
     mem.get_fact("autonomy.last_cycle_at")
         .ok()
@@ -952,12 +971,14 @@ fn autonomy_status(state: &AppState) -> Result<AutonomyStatus, String> {
     let enabled = autonomy_enabled(&mem);
     let caps = autonomy_caps(&mem);
     let last = last_cycle_at(&mem);
+    let active = last_user_activity(&mem);
     let env = std::env::var("JARVIS_AUTONOMY").ok();
     let halt = autonomy::may_start(
         enabled,
         stop_file_exists,
         env.as_deref(),
         last,
+        active,
         now_unix(),
         &caps,
     )
@@ -1086,25 +1107,43 @@ fn autonomy_plan(state: tauri::State<'_, AppState>) -> Result<autonomy::CyclePla
     Ok(autonomy::plan_cycle(&snap, &caps))
 }
 
+/// Only one cycle may execute at a time, whether it was started by the heartbeat
+/// or by the button.
+static CYCLE_GATE: autonomy::CycleGate = autonomy::CycleGate::new();
+
+/// One place that turns a refusal into words, so the button and the heartbeat
+/// never explain the same halt differently.
+fn halt_message(halt: autonomy::Halt) -> String {
+    match halt {
+        autonomy::Halt::StopFile => {
+            "auto mode is halted by the STOP file — delete it to rearm".to_string()
+        }
+        autonomy::Halt::EnvVar => "auto mode is disabled by JARVIS_AUTONOMY".to_string(),
+        autonomy::Halt::Disabled => "auto mode is off".to_string(),
+        autonomy::Halt::TooSoon { wait_secs } => format!("too soon — next cycle in {wait_secs}s"),
+        autonomy::Halt::Busy { wait_secs } => {
+            format!("you're using the app — unattended work waits {wait_secs}s")
+        }
+        autonomy::Halt::AlreadyRunning => "a cycle is already running".to_string(),
+    }
+}
+
 /// Runs one cycle. Refuses unless every gate passes, re-checks the stop file
 /// between actions, and logs what it did with its usage.
 #[tauri::command]
 async fn autonomy_run_cycle(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    // Gate first. `may_start` is the single place that decides this.
+    // One cycle at a time, before anything else. The cycle gap is only written
+    // when a cycle finishes, so mid-flight `may_start` still reads as satisfied:
+    // the heartbeat and this command would otherwise both be told yes and
+    // together spend twice the caps. Released on drop, including on a panic.
+    let _in_flight = CYCLE_GATE.enter().map_err(halt_message)?;
+
+    // Then the policy gate. `may_start` is the single place that decides this.
     let status = autonomy_status(&state)?;
     if let Some(halt) = status.halt {
-        return Err(match halt {
-            autonomy::Halt::StopFile => {
-                "auto mode is halted by the STOP file — delete it to rearm".to_string()
-            }
-            autonomy::Halt::EnvVar => "auto mode is disabled by JARVIS_AUTONOMY".to_string(),
-            autonomy::Halt::Disabled => "auto mode is off".to_string(),
-            autonomy::Halt::TooSoon { wait_secs } => {
-                format!("too soon — next cycle in {wait_secs}s")
-            }
-        });
+        return Err(halt_message(halt));
     }
 
     let plan = {
@@ -1211,6 +1250,102 @@ async fn autonomy_run_cycle(
         "stop_reason": stop_reason,
         "deferred": plan.deferred,
     }))
+}
+
+/// The last thing the heartbeat did, so the UI can prove it is alive. Kept in
+/// memory only: it is diagnostics, not state worth persisting.
+#[cfg(desktop)]
+static LAST_BEAT: Mutex<Option<(i64, autonomy::Beat)>> = Mutex::new(None);
+
+#[cfg(desktop)]
+fn record_beat(beat: autonomy::Beat) {
+    if let Ok(mut slot) = LAST_BEAT.lock() {
+        *slot = Some((now_unix(), beat));
+    }
+}
+
+/// What the heartbeat last did, and when.
+#[tauri::command]
+fn autonomy_last_beat() -> Option<serde_json::Value> {
+    #[cfg(desktop)]
+    {
+        LAST_BEAT
+            .lock()
+            .ok()
+            .and_then(|slot| slot.clone())
+            .map(|(at, beat)| serde_json::json!({ "at": at, "beat": beat }))
+    }
+    #[cfg(not(desktop))]
+    {
+        None
+    }
+}
+
+/// Starts the background heartbeat (§7).
+///
+/// It wakes cheaply and often, and does nothing unless `may_start` says every
+/// gate passes — so the STOP file stays responsive without the loop being a busy
+/// loop. It never decides anything itself: the poll interval, the gates, and the
+/// plan all come from the tested core.
+#[cfg(desktop)]
+fn spawn_heartbeat(app: tauri::AppHandle) {
+    // A plain OS thread rather than an async task: the sleep is long and the one
+    // async call is bridged with `block_on`, so there is nothing to gain from
+    // holding a slot on the shared runtime.
+    std::thread::spawn(move || {
+        loop {
+            // Re-read caps every wake so a change takes effect without a restart.
+            let poll = {
+                let state = app.state::<AppState>();
+                let caps = state
+                    .memory
+                    .lock()
+                    .map(|mem| autonomy_caps(&mem))
+                    .unwrap_or_default();
+                autonomy::heartbeat_poll_secs(&caps)
+            };
+            std::thread::sleep(std::time::Duration::from_secs(poll));
+
+            // A cycle already running (started from the button) is a hold, not
+            // an idle beat: reporting it as idle would misdescribe a busy loop.
+            if CYCLE_GATE.is_running() {
+                record_beat(autonomy::Beat::Held {
+                    halt: autonomy::Halt::AlreadyRunning,
+                });
+                continue;
+            }
+
+            let state = app.state::<AppState>();
+            // The gate decides. Nothing below runs unless it passes.
+            match autonomy_status(&state) {
+                Ok(status) => {
+                    if let Some(halt) = status.halt {
+                        record_beat(autonomy::Beat::Held { halt });
+                        continue;
+                    }
+                }
+                Err(_) => continue,
+            }
+
+            match tauri::async_runtime::block_on(autonomy_run_cycle(app.state::<AppState>())) {
+                Ok(result) => {
+                    let actions = result
+                        .get("did")
+                        .and_then(|d| d.as_array())
+                        .map(|a| a.len() as u32)
+                        .unwrap_or(0);
+                    record_beat(if actions == 0 {
+                        autonomy::Beat::Idle
+                    } else {
+                        autonomy::Beat::Ran { actions }
+                    });
+                }
+                // A gate raced us between the check and the call. Report what it
+                // actually said instead of guessing which gate it was.
+                Err(why) => record_beat(autonomy::Beat::Refused { why }),
+            }
+        }
+    });
 }
 
 // --- Voice v2: wake word + hands-free conversation (§6.4) ---
@@ -1338,6 +1473,7 @@ fn voice_heard(
 ) -> Result<serde_json::Value, String> {
     #[cfg(desktop)]
     {
+        touch_user_activity(&state);
         let (action, snap) = {
             let mut session = state.session.lock().map_err(|e| e.to_string())?;
             let action = session.heard(&transcript, duration_ms);
@@ -2080,6 +2216,10 @@ pub fn run() {
             });
             #[cfg(desktop)]
             setup_desktop_ambient(app)?;
+            // Auto mode's heartbeat. Safe to start unconditionally: it does
+            // nothing at all until the gates pass, and auto mode defaults off.
+            #[cfg(desktop)]
+            spawn_heartbeat(app.handle().clone());
             Ok(())
         })
         // Closing the window hides Jarvis to the tray instead of quitting, so it
@@ -2128,6 +2268,7 @@ pub fn run() {
             replay_state_at,
             replay_audit_state,
             autonomy_state,
+            autonomy_last_beat,
             autonomy_set_enabled,
             autonomy_set_caps,
             autonomy_stop_file,

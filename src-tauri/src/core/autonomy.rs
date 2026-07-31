@@ -18,6 +18,7 @@
 //! kill-switch file are passed in, which is what makes the policy testable.
 
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 // --- 1. What the autonomous loop is allowed to do at all ---
 
@@ -125,6 +126,18 @@ pub struct Caps {
     pub max_seconds: u32,
     /// Minimum gap between cycles, so a heartbeat can't become a busy loop.
     pub min_cycle_gap_secs: i64,
+    /// How long the user must have been quiet before an unattended cycle runs.
+    ///
+    /// This is the difference between a background loop that is helpful and one
+    /// that is rude: reflection and indexing both make model calls, and doing
+    /// that while someone is mid-conversation makes the app feel slow for no
+    /// visible reason. Deferring costs nothing — the work is never urgent.
+    #[serde(default = "default_min_idle_secs")]
+    pub min_idle_secs: i64,
+}
+
+fn default_min_idle_secs() -> i64 {
+    120
 }
 
 impl Default for Caps {
@@ -134,6 +147,7 @@ impl Default for Caps {
             max_tool_calls: 6,
             max_seconds: 120,
             min_cycle_gap_secs: 900, // 15 minutes
+            min_idle_secs: default_min_idle_secs(),
         }
     }
 }
@@ -200,6 +214,13 @@ pub enum Halt {
     Disabled,
     /// Cycles are rate-limited; this one is too soon.
     TooSoon { wait_secs: i64 },
+    /// The user is actively using the app; unattended work waits.
+    Busy { wait_secs: i64 },
+    /// A cycle is already in flight. The gaps between cycles are enforced by
+    /// `last_cycle_at`, which is only written when a cycle *finishes* — so
+    /// without this, a second cycle starting mid-flight would pass every gate
+    /// and quietly double the caps.
+    AlreadyRunning,
 }
 
 /// Reads the env var into a decision. Anything other than an explicit on-ish
@@ -219,6 +240,7 @@ pub fn may_start(
     stop_file_exists: bool,
     env: Option<&str>,
     last_cycle_at: Option<i64>,
+    last_user_activity: Option<i64>,
     now: i64,
     caps: &Caps,
 ) -> Result<(), Halt> {
@@ -241,7 +263,95 @@ pub fn may_start(
             });
         }
     }
+    // Softest gate, checked last so a hard halt is reported in preference to a
+    // temporary one.
+    if let Some(active) = last_user_activity {
+        let quiet = now.saturating_sub(active);
+        if quiet < caps.min_idle_secs {
+            return Err(Halt::Busy {
+                wait_secs: caps.min_idle_secs - quiet,
+            });
+        }
+    }
     Ok(())
+}
+
+// --- 5. The heartbeat ---
+
+/// How often the background loop should wake to *check* whether a cycle may run.
+///
+/// Deliberately not the cycle interval: waking cheaply and often keeps the STOP
+/// file responsive, while `may_start` is what decides whether anything actually
+/// happens. Bounded to 5..=60s so it is neither a busy loop nor so sleepy that
+/// disarming appears not to work.
+pub fn heartbeat_poll_secs(caps: &Caps) -> u64 {
+    let quarter = (caps.min_cycle_gap_secs / 4).max(1) as u64;
+    quarter.clamp(5, 60)
+}
+
+/// A one-at-a-time latch around cycle execution.
+///
+/// `may_start` alone can't provide this: the cycle gap keys off `last_cycle_at`,
+/// which is only written when a cycle finishes, so two callers checking the gate
+/// while a third cycle is mid-flight would both be told yes. The heartbeat and
+/// the manual "Run one cycle" button are exactly those two callers.
+///
+/// Release is on `Drop`, so an early return or a panic inside a cycle can't
+/// wedge auto mode in a permanently-busy state.
+#[derive(Debug, Default)]
+pub struct CycleGate {
+    running: AtomicBool,
+}
+
+impl CycleGate {
+    pub const fn new() -> Self {
+        Self {
+            running: AtomicBool::new(false),
+        }
+    }
+
+    /// Takes the latch, or reports why not. The returned guard releases it.
+    pub fn enter(&self) -> Result<CycleGuard<'_>, Halt> {
+        self.running
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map(|_| CycleGuard { gate: self })
+            .map_err(|_| Halt::AlreadyRunning)
+    }
+
+    /// Whether a cycle is in flight. For reporting only: acting on this would
+    /// reintroduce the race that `enter` exists to close.
+    pub fn is_running(&self) -> bool {
+        self.running.load(Ordering::Acquire)
+    }
+}
+
+/// Holds the latch for as long as a cycle is running.
+#[derive(Debug)]
+pub struct CycleGuard<'a> {
+    gate: &'a CycleGate,
+}
+
+impl Drop for CycleGuard<'_> {
+    fn drop(&mut self) {
+        self.gate.running.store(false, Ordering::Release);
+    }
+}
+
+/// What the heartbeat did on one wake-up, for the UI and the log. A heartbeat
+/// that runs invisibly is indistinguishable from one that is broken.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "outcome")]
+pub enum Beat {
+    /// A gate refused; nothing happened.
+    Held { halt: Halt },
+    /// Gates passed on the check, then the cycle itself refused — the STOP file
+    /// appeared mid-wake, or another cycle took the latch first. Carries the
+    /// message rather than a guessed reason: inventing one would misreport it.
+    Refused { why: String },
+    /// Gates passed but the planner had nothing worth doing.
+    Idle,
+    /// A cycle ran.
+    Ran { actions: u32 },
 }
 
 // --- 4. The plan ---
@@ -463,7 +573,7 @@ mod tests {
     fn the_stop_file_overrides_everything_including_enabled() {
         // An emergency brake that can be overridden is not an emergency brake.
         assert_eq!(
-            may_start(true, true, Some("on"), None, NOW, &Caps::default()),
+            may_start(true, true, Some("on"), None, None, NOW, &Caps::default()),
             Err(Halt::StopFile)
         );
     }
@@ -473,21 +583,21 @@ mod tests {
         let caps = Caps::default();
         for value in ["off", "0", "false", "no", "", "maybe", "ON!"] {
             assert_eq!(
-                may_start(true, false, Some(value), None, NOW, &caps),
+                may_start(true, false, Some(value), None, None, NOW, &caps),
                 Err(Halt::EnvVar),
                 "{value:?} must not enable autonomy"
             );
         }
         for value in ["on", "1", "true", "yes", "enabled", " ON "] {
             assert!(
-                may_start(true, false, Some(value), None, NOW, &caps).is_ok(),
+                may_start(true, false, Some(value), None, None, NOW, &caps).is_ok(),
                 "{value:?} should be accepted"
             );
         }
         // Unset means no opinion; the in-app toggle decides.
-        assert!(may_start(true, false, None, None, NOW, &caps).is_ok());
+        assert!(may_start(true, false, None, None, None, NOW, &caps).is_ok());
         assert_eq!(
-            may_start(false, false, None, None, NOW, &caps),
+            may_start(false, false, None, None, None, NOW, &caps),
             Err(Halt::Disabled)
         );
     }
@@ -497,7 +607,7 @@ mod tests {
         let caps = Caps::default();
         // Just ran.
         assert_eq!(
-            may_start(true, false, None, Some(NOW - 10), NOW, &caps),
+            may_start(true, false, None, Some(NOW - 10), None, NOW, &caps),
             Err(Halt::TooSoon {
                 wait_secs: caps.min_cycle_gap_secs - 10
             })
@@ -508,12 +618,184 @@ mod tests {
             false,
             None,
             Some(NOW - caps.min_cycle_gap_secs),
+            None,
             NOW,
             &caps
         )
         .is_ok());
         // A clock that jumped backwards must not unlock the gate.
-        assert!(may_start(true, false, None, Some(NOW + 5_000), NOW, &caps).is_err());
+        assert!(may_start(true, false, None, Some(NOW + 5_000), None, NOW, &caps).is_err());
+    }
+
+    // --- the idle gate ---
+
+    #[test]
+    fn an_unattended_cycle_waits_while_the_user_is_active() {
+        // Reflection and indexing both make model calls; doing that mid-
+        // conversation makes the app feel slow for no visible reason.
+        let caps = Caps::default();
+        assert_eq!(
+            may_start(true, false, None, None, Some(NOW - 5), NOW, &caps),
+            Err(Halt::Busy {
+                wait_secs: caps.min_idle_secs - 5
+            })
+        );
+    }
+
+    #[test]
+    fn a_quiet_app_is_allowed_to_work() {
+        let caps = Caps::default();
+        assert!(may_start(
+            true,
+            false,
+            None,
+            None,
+            Some(NOW - caps.min_idle_secs),
+            NOW,
+            &caps
+        )
+        .is_ok());
+        // Never used at all counts as idle, not as blocked.
+        assert!(may_start(true, false, None, None, None, NOW, &caps).is_ok());
+    }
+
+    #[test]
+    fn hard_halts_are_reported_in_preference_to_being_busy() {
+        // If the STOP file is set *and* the user is active, the useful answer is
+        // "you stopped it", not "wait 2 minutes".
+        let caps = Caps::default();
+        assert_eq!(
+            may_start(true, true, None, None, Some(NOW), NOW, &caps),
+            Err(Halt::StopFile)
+        );
+        assert_eq!(
+            may_start(false, false, None, None, Some(NOW), NOW, &caps),
+            Err(Halt::Disabled)
+        );
+        assert_eq!(
+            may_start(true, false, Some("off"), None, Some(NOW), NOW, &caps),
+            Err(Halt::EnvVar)
+        );
+    }
+
+    #[test]
+    fn a_backwards_clock_does_not_unlock_the_idle_gate() {
+        let caps = Caps::default();
+        assert!(may_start(true, false, None, None, Some(NOW + 5_000), NOW, &caps).is_err());
+    }
+
+    // --- the heartbeat ---
+
+    #[test]
+    fn the_poll_interval_is_bounded_at_both_ends() {
+        // Never a busy loop, never so sleepy that disarming looks broken.
+        for gap in [0, 1, 60, 900, 86_400] {
+            let caps = Caps {
+                min_cycle_gap_secs: gap,
+                ..Caps::default()
+            };
+            let poll = heartbeat_poll_secs(&caps);
+            assert!((5..=60).contains(&poll), "gap {gap} gave poll {poll}");
+        }
+    }
+
+    #[test]
+    fn the_poll_interval_is_shorter_than_the_cycle_gap() {
+        // Otherwise a cycle could be skipped entirely by unlucky timing.
+        let caps = Caps::default();
+        let poll = heartbeat_poll_secs(&caps) as i64;
+        assert!(poll < caps.min_cycle_gap_secs, "poll {poll}");
+    }
+
+    #[test]
+    fn a_beat_reports_what_actually_happened() {
+        // A heartbeat that runs invisibly is indistinguishable from a broken one.
+        let held = serde_json::to_string(&Beat::Held {
+            halt: Halt::Busy { wait_secs: 30 },
+        })
+        .unwrap();
+        assert!(held.contains("\"outcome\":\"held\""), "{held}");
+        assert!(held.contains("busy"), "{held}");
+        assert!(serde_json::to_string(&Beat::Idle).unwrap().contains("idle"));
+        assert!(serde_json::to_string(&Beat::Ran { actions: 2 })
+            .unwrap()
+            .contains("\"actions\":2"));
+        // A racing refusal carries the real message rather than a guessed gate.
+        let refused = serde_json::to_string(&Beat::Refused {
+            why: "a cycle is already running".into(),
+        })
+        .unwrap();
+        assert!(refused.contains("\"outcome\":\"refused\""), "{refused}");
+        assert!(refused.contains("already running"), "{refused}");
+    }
+
+    #[test]
+    fn caps_from_an_older_config_still_load() {
+        // min_idle_secs was added after the first release; a stored config
+        // without it must not fail to parse and disable auto mode silently.
+        let legacy =
+            r#"{"max_actions":3,"max_tool_calls":6,"max_seconds":120,"min_cycle_gap_secs":900}"#;
+        let caps: Caps = serde_json::from_str(legacy).unwrap();
+        assert_eq!(caps.min_idle_secs, 120, "falls back to the default");
+    }
+
+    // --- one cycle at a time ---
+
+    #[test]
+    fn a_second_cycle_cannot_start_while_one_is_in_flight() {
+        // The cycle gap is written when a cycle *finishes*, so mid-flight the
+        // rate limit still reads as satisfied. Without this latch the heartbeat
+        // and the manual button would both be told yes and double the caps.
+        let gate = CycleGate::new();
+        let held = gate.enter().expect("first caller takes it");
+        assert_eq!(gate.enter().unwrap_err(), Halt::AlreadyRunning);
+        assert!(gate.is_running());
+        drop(held);
+        assert!(!gate.is_running());
+        assert!(gate.enter().is_ok(), "released once the cycle ended");
+    }
+
+    #[test]
+    fn the_latch_is_released_even_if_a_cycle_unwinds() {
+        // A panic mid-cycle must not wedge auto mode as permanently busy.
+        let gate = CycleGate::new();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _held = gate.enter().unwrap();
+            panic!("a cycle blew up");
+        }));
+        assert!(!gate.is_running());
+        assert!(gate.enter().is_ok());
+    }
+
+    #[test]
+    fn only_one_of_many_racing_callers_gets_in() {
+        let gate = std::sync::Arc::new(CycleGate::new());
+        let winners = std::sync::Arc::new(AtomicBool::new(false));
+        let mut doubled = false;
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    let gate = gate.clone();
+                    let winners = winners.clone();
+                    scope.spawn(move || match gate.enter() {
+                        Ok(guard) => {
+                            // If a second thread is ever inside here at the same
+                            // time, this swap sees `true` and the test fails.
+                            let clash = winners.swap(true, Ordering::AcqRel);
+                            std::thread::sleep(std::time::Duration::from_millis(5));
+                            winners.store(false, Ordering::Release);
+                            drop(guard);
+                            clash
+                        }
+                        Err(_) => false,
+                    })
+                })
+                .collect();
+            for h in handles {
+                doubled |= h.join().unwrap();
+            }
+        });
+        assert!(!doubled, "two cycles were inside the latch at once");
     }
 
     // --- caps ---
@@ -534,6 +816,7 @@ mod tests {
             max_tool_calls: 3,
             max_seconds: 60,
             min_cycle_gap_secs: 0,
+            min_idle_secs: 0,
         };
         let mut usage = Usage::default();
         assert_eq!(usage.room_for(&caps, 1), None);
@@ -604,6 +887,7 @@ mod tests {
             max_tool_calls: 2,
             max_seconds: 600,
             min_cycle_gap_secs: 0,
+            min_idle_secs: 0,
         };
         let plan = plan_cycle(&busy(), &caps);
         let spent: u32 = plan.actions.iter().map(|a| a.tool_calls).sum();
@@ -666,6 +950,7 @@ mod tests {
             max_tool_calls: 9,
             max_seconds: 45,
             min_cycle_gap_secs: 600,
+            min_idle_secs: 90,
         };
         let json = serde_json::to_string(&caps).unwrap();
         assert_eq!(serde_json::from_str::<Caps>(&json).unwrap(), caps);

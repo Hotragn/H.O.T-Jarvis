@@ -368,13 +368,30 @@ export interface AutonomyCaps {
   max_tool_calls: number;
   max_seconds: number;
   min_cycle_gap_secs: number;
+  /// How long you must have been quiet before unattended work runs.
+  min_idle_secs: number;
 }
 
 export type Halt =
   | { reason: "stop_file" }
   | { reason: "env_var" }
   | { reason: "disabled" }
-  | { reason: "too_soon"; wait_secs: number };
+  | { reason: "too_soon"; wait_secs: number }
+  | { reason: "busy"; wait_secs: number }
+  | { reason: "already_running" };
+
+/// What the background heartbeat did on its last wake-up.
+export type Beat =
+  | { outcome: "held"; halt: Halt }
+  | { outcome: "refused"; why: string }
+  | { outcome: "idle" }
+  | { outcome: "ran"; actions: number };
+
+export interface LastBeat {
+  /// Unix seconds.
+  at: number;
+  beat: Beat;
+}
 
 export interface AutonomyStatus {
   enabled: boolean;
@@ -438,6 +455,13 @@ export async function autonomyStopFile(engage: boolean): Promise<AutonomyStatus>
 export async function autonomyPlan(): Promise<CyclePlan | null> {
   if (!inTauri) return null;
   return invoke<CyclePlan>("autonomy_plan");
+}
+
+/// What the background heartbeat last did. Null until it has woken once, which
+/// is why the UI says "waiting for the first beat" rather than showing nothing.
+export async function autonomyLastBeat(): Promise<LastBeat | null> {
+  if (!inTauri) return null;
+  return invoke<LastBeat | null>("autonomy_last_beat");
 }
 
 export async function autonomyRunCycle(): Promise<CycleResult> {
