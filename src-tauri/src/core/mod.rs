@@ -1,6 +1,7 @@
 pub mod audio;
 pub mod authoring;
 pub mod autonomy;
+pub mod bargein;
 pub mod calibration;
 pub mod confidence;
 pub mod conversation;

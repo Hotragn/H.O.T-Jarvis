@@ -65,6 +65,9 @@ export function nextHint(session: VoiceSession | null): string | null {
       ? `Ask a follow-up (${secs}s) — no wake phrase needed.`
       : "Ask a follow-up — no wake phrase needed.";
   }
+  // Voice v3. Barge-in that nobody knows about might as well not exist, and
+  // while it's speaking is the only moment the hint is useful.
+  if (session.wants_barge_monitor) return "Just talk over me to interrupt.";
   return null;
 }
 

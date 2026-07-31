@@ -504,6 +504,9 @@ export interface VoiceSession {
   /// Whether the mic should be open right now. The UI mirrors this rather than
   /// deciding for itself — the policy lives in the tested Rust core.
   wants_audio: boolean;
+  /// Whether the mic should be watching loudness for barge-in. Distinct from
+  /// wants_audio: this path never transcribes.
+  wants_barge_monitor: boolean;
   needs_wake: boolean;
   follow_up_remaining_ms: number;
 }
@@ -544,6 +547,8 @@ export type VoiceEvent =
   | "answered_silent"
   | "finished_speaking"
   | "failed"
+  /// Voice v3: the user talked over the answer.
+  | "interrupted"
   | "tick";
 
 export async function voiceAdvance(
@@ -552,6 +557,16 @@ export async function voiceAdvance(
 ): Promise<VoiceSession> {
   if (!inTauri) throw new Error("No backend in the browser preview.");
   return invoke<VoiceSession>("voice_advance", { event, elapsedMs });
+}
+
+/// Watches for the user talking over the assistant, for at most `maxMs`.
+/// Resolves true if they did.
+///
+/// Loudness only — nothing captured on this path is transcribed or kept, so the
+/// assistant cannot hear its own voice into a request.
+export async function voiceWatchBarge(maxMs: number): Promise<boolean> {
+  if (!inTauri) return false;
+  return invoke<boolean>("voice_watch_barge", { maxMs });
 }
 
 // --- Confidence v1: calibration tracking ---

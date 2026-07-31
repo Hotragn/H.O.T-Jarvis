@@ -84,6 +84,21 @@ export function speak(
   window.speechSynthesis.speak(utterance);
 }
 
+/// How long to let the barge-in watcher run for a given answer.
+///
+/// The watcher holds the microphone open, so it must never outlive the playback
+/// it is guarding. There is no API that reports how long an utterance will take,
+/// so this estimates from length at a deliberately generous speaking rate and
+/// adds slack: overshooting a little means the mic stays open a few seconds too
+/// long, while undershooting means the tail of a long answer can't be
+/// interrupted, which is exactly when you most want to.
+export function speechBudgetMs(text: string): number {
+  const words = sanitizeForSpeech(text).split(/\s+/).filter(Boolean).length;
+  // ~2.5 words/second is slower than any TTS default, so this over-estimates.
+  const estimated = (words / 2.5) * 1000;
+  return Math.min(Math.max(estimated + 3_000, 4_000), 120_000);
+}
+
 export function stopSpeaking(): void {
   if (ttsAvailable) window.speechSynthesis.cancel();
 }

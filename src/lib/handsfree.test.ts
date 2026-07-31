@@ -22,6 +22,7 @@ const session = (over: Partial<VoiceSession> = {}): VoiceSession => ({
   phase: "waiting",
   wake_phrase: "hey jarvis",
   wants_audio: true,
+  wants_barge_monitor: false,
   needs_wake: true,
   follow_up_remaining_ms: 0,
   ...over,
@@ -96,5 +97,30 @@ describe("wakePhraseError", () => {
     expect(wakePhraseError("jarvis")).toContain("two words");
     expect(wakePhraseError("")).toContain("Enter");
     expect(wakePhraseError("   ")).toContain("Enter");
+  });
+});
+
+// Voice v3: barge-in has to be discoverable, and the indicator must not claim the
+// mic is recording when it is only watching loudness.
+describe("barge-in presentation", () => {
+  it("tells the user they can interrupt, but only while speaking", () => {
+    expect(
+      nextHint(session({ phase: "speaking", needs_wake: false, wants_barge_monitor: true })),
+    ).toContain("interrupt");
+    // Not while thinking: there is nothing to talk over yet.
+    expect(
+      nextHint(session({ phase: "thinking", needs_wake: false, wants_barge_monitor: false })),
+    ).toBeNull();
+  });
+
+  it("does not report capturing while it is only watching loudness", () => {
+    // The capture indicator is a privacy signal. Barge-in monitoring never
+    // transcribes, so showing "recording" for it would be a lie.
+    const watching = session({
+      phase: "speaking",
+      wants_audio: false,
+      wants_barge_monitor: true,
+    });
+    expect(isCapturing(watching)).toBe(false);
   });
 });

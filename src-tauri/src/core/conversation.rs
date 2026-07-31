@@ -52,6 +52,16 @@ impl Phase {
     pub fn needs_wake(self) -> bool {
         matches!(self, Phase::Waiting)
     }
+
+    /// Should the mic be open purely to *watch loudness*, without transcribing?
+    ///
+    /// Only while speaking, and deliberately distinct from `wants_audio`: this is
+    /// what makes barge-in possible without reintroducing the failure
+    /// `wants_audio` exists to prevent. Nothing captured here reaches a model, so
+    /// the assistant still cannot hear itself into a loop (see `core::bargein`).
+    pub fn wants_barge_monitor(self) -> bool {
+        matches!(self, Phase::Speaking)
+    }
 }
 
 /// What the caller should do next. Returned instead of performed, so the state
@@ -187,6 +197,23 @@ impl Session {
             return Action::Idle;
         }
         self.phase = Phase::FollowUp;
+        self.follow_up_ms = 0;
+        Action::Idle
+    }
+
+    /// The user talked over the answer (Voice v3). Playback stops and the session
+    /// goes straight to capturing, because someone who interrupts is already
+    /// mid-sentence — making them wait for a prompt or say the wake phrase again
+    /// would waste the words they just spoke.
+    ///
+    /// Only meaningful while speaking. Anywhere else it is a no-op rather than an
+    /// error: the detector runs on a separate thread and can report a moment
+    /// after playback ended on its own.
+    pub fn interrupted(&mut self) -> Action {
+        if self.phase != Phase::Speaking {
+            return Action::Idle;
+        }
+        self.phase = Phase::Listening;
         self.follow_up_ms = 0;
         Action::Idle
     }
@@ -442,5 +469,96 @@ mod tests {
         );
         let json = serde_json::to_string(&Action::Ask { text: "hi".into() }).unwrap();
         assert!(json.contains("\"action\":\"ask\""), "got {json}");
+    }
+    // --- barge-in (Voice v3) ---
+
+    #[test]
+    fn the_mic_watches_loudness_while_speaking_but_never_transcribes() {
+        // The two must stay separate. If `wants_audio` ever includes Speaking,
+        // the assistant transcribes itself and answers its own voice forever.
+        assert!(
+            !Phase::Speaking.wants_audio(),
+            "never capture for transcription"
+        );
+        assert!(
+            Phase::Speaking.wants_barge_monitor(),
+            "but do watch loudness"
+        );
+        for phase in [
+            Phase::Off,
+            Phase::Waiting,
+            Phase::Listening,
+            Phase::Thinking,
+            Phase::FollowUp,
+        ] {
+            assert!(
+                !phase.wants_barge_monitor(),
+                "{phase:?} has no playback to interrupt"
+            );
+        }
+    }
+
+    #[test]
+    fn interrupting_goes_straight_to_capturing() {
+        // Someone who talks over the answer is already mid-sentence. Sending them
+        // back to Waiting would throw away the words they just said.
+        let mut s = Session::new(WAKE);
+        s.start();
+        s.heard("hey jarvis what time is it", LONG);
+        s.answered(true);
+        assert_eq!(s.phase(), Phase::Speaking);
+        assert_eq!(s.interrupted(), Action::Idle);
+        assert_eq!(s.phase(), Phase::Listening);
+        assert!(!s.phase().needs_wake(), "no wake phrase needed to continue");
+        assert!(s.phase().wants_audio(), "and the mic is capturing again");
+    }
+
+    #[test]
+    fn a_request_spoken_over_the_answer_reaches_the_model() {
+        // End to end: interrupt, then the take that follows is a real request.
+        let mut s = Session::new(WAKE);
+        s.start();
+        s.heard("hey jarvis", LONG);
+        s.heard("what time is it", LONG);
+        s.answered(true);
+        s.interrupted();
+        assert_eq!(
+            s.heard("no, tomorrow", LONG),
+            Action::Ask {
+                text: "no tomorrow".into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_late_interrupt_after_playback_ended_is_harmless() {
+        // The detector runs on its own thread and can report just after speech
+        // finished. That must not drag a settled session backwards.
+        let mut s = Session::new(WAKE);
+        s.start();
+        s.heard("hey jarvis what time is it", LONG);
+        s.answered(true);
+        s.finished_speaking();
+        assert_eq!(s.phase(), Phase::FollowUp);
+        assert_eq!(s.interrupted(), Action::Idle);
+        assert_eq!(s.phase(), Phase::FollowUp, "unchanged");
+
+        // And it cannot wake a session that is off.
+        let mut off = Session::new(WAKE);
+        assert_eq!(off.interrupted(), Action::Idle);
+        assert_eq!(off.phase(), Phase::Off);
+    }
+
+    #[test]
+    fn interrupting_resets_the_follow_up_clock() {
+        // Otherwise time spent speaking would eat into the window the user gets
+        // after the interruption.
+        let mut s = Session::new(WAKE);
+        s.start();
+        s.heard("hey jarvis hello", LONG);
+        s.answered(true);
+        s.interrupted();
+        s.answered(false);
+        assert_eq!(s.follow_up_remaining_ms(), FOLLOW_UP_WINDOW_MS);
     }
 }

@@ -18,6 +18,7 @@ import {
   sttStatus,
   sttStop,
   voiceAdvance,
+  voiceWatchBarge,
   voiceHandsFree,
   voiceHeard,
   voiceSession,
@@ -41,6 +42,7 @@ import {
   chooseSttRoute,
   recognitionCtor,
   speak,
+  speechBudgetMs,
   stopSpeaking,
   STT_UNAVAILABLE_MESSAGE,
   sttAvailable,
@@ -375,13 +377,31 @@ export default function App() {
             const spoken = voiceOn && !!reply.content;
             await voiceAdvance(spoken ? "answered_speaking" : "answered_silent").then(setVoice);
             if (spoken) {
+              // Voice v3: playback and the barge-in watcher run together, and
+              // whichever finishes first ends the turn. `settled` is the guard —
+              // without it a natural ending and an interruption could both
+              // advance the session, and the second one would move a session
+              // that had already gone on to something else.
+              let settled = false;
+              const finish = (event: "finished_speaking" | "interrupted") => {
+                if (settled) return;
+                settled = true;
+                setSpeaking(false);
+                voiceAdvance(event).then(setVoice).catch(() => {});
+              };
               speak(reply.content, {
                 onstart: () => setSpeaking(true),
-                onend: () => {
-                  setSpeaking(false);
-                  voiceAdvance("finished_speaking").then(setVoice).catch(() => {});
-                },
+                onend: () => finish("finished_speaking"),
               });
+              // Bounded by the estimated length of the answer plus slack, so the
+              // watcher can never hold the microphone open indefinitely.
+              void voiceWatchBarge(speechBudgetMs(reply.content))
+                .then((interrupted) => {
+                  if (cancelled || !interrupted || settled) return;
+                  stopSpeaking();
+                  finish("interrupted");
+                })
+                .catch(() => {});
             }
           } catch (e) {
             say(String(e));

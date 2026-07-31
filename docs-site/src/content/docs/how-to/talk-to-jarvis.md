@@ -103,6 +103,36 @@ privacy question, not a UI detail:
 You can change the wake phrase; it must be at least two words, because
 one-word phrases trigger constantly in ordinary speech.
 
+### Talking over it (Voice v3)
+
+While Jarvis is reading an answer out, you can just start talking. It stops and
+listens, and what you say next goes straight to the model — no wake phrase, and
+no waiting for it to finish being wrong.
+
+The hard part is that a microphone next to a speaker hears Jarvis at least as
+loudly as it hears you. With no echo cancellation, a fixed threshold either
+fires on Jarvis's own voice (so it interrupts itself, forever) or is set so high
+that only shouting works.
+
+So it measures instead of assuming. For the first half-second of playback the
+detector does nothing but listen to how loud *Jarvis* sounds in *your*
+microphone, in this room, at this volume. After that, only sound clearly above
+that measured level, held long enough to not be a cough or a door, counts as you
+talking.
+
+Two consequences worth knowing:
+
+- **Headphones make it near-perfect.** There's no echo to clear, so anything you
+  say wins immediately.
+- **A laptop at high volume may defeat it.** If Jarvis is louder in the mic than
+  you are, nothing you say can clear the measured floor. Turn the volume down or
+  use headphones.
+
+Nothing captured while it speaks is transcribed or kept. The detector reads
+loudness and throws the audio away frame by frame, so Jarvis still cannot hear
+its own voice into a request — that's the property the closed mic protected in
+v2, and barge-in does not weaken it.
+
 ## What it does to your audio
 
 Before transcription, the take is conditioned locally:
