@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import AutonomyPanel from "../components/AutonomyPanel";
 import {
   getProviderSettings,
   inTauri,
@@ -59,6 +60,8 @@ export default function SettingsView() {
 
   return (
     <div className="settings-view">
+      <AutonomyPanel />
+
       <div className="panel-title-row">
         <span className="panel-title">providers &amp; models</span>
         <button

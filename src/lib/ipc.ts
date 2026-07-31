@@ -345,6 +345,106 @@ export async function setProviderSettings(s: ProviderSettings): Promise<boolean>
   });
 }
 
+// --- M3: auto mode (§7) ---
+
+export type AutonomyAction =
+  | "reflect"
+  | "tidy_insights"
+  | "index_memory"
+  | "test_skills"
+  | "replay_audit"
+  | "save_note"
+  | "author_skill"
+  | "run_skill"
+  | "wipe_memory"
+  | "delete_note"
+  | "change_settings"
+  | "external_side_effect";
+
+export type Clearance = "auto" | "needs_approval" | "forbidden";
+
+export interface AutonomyCaps {
+  max_actions: number;
+  max_tool_calls: number;
+  max_seconds: number;
+  min_cycle_gap_secs: number;
+}
+
+export type Halt =
+  | { reason: "stop_file" }
+  | { reason: "env_var" }
+  | { reason: "disabled" }
+  | { reason: "too_soon"; wait_secs: number };
+
+export interface AutonomyStatus {
+  enabled: boolean;
+  caps: AutonomyCaps;
+  /// null when a cycle could run right now.
+  halt: Halt | null;
+  stop_file: string;
+  stop_file_exists: boolean;
+  last_cycle_at: number | null;
+}
+
+export interface PlannedAction {
+  action: AutonomyAction;
+  clearance: Clearance;
+  tool_calls: number;
+  reason: string;
+}
+
+export interface CyclePlan {
+  actions: PlannedAction[];
+  deferred: PlannedAction[];
+  stop_reason: string;
+  caps: AutonomyCaps;
+  idle: boolean;
+}
+
+export interface CycleResult {
+  did: {
+    action: AutonomyAction;
+    reason: string;
+    result: unknown;
+    error: string | null;
+  }[];
+  usage: { actions: number; tool_calls: number; seconds: number };
+  stop_reason: string;
+  deferred: PlannedAction[];
+}
+
+export async function autonomyState(): Promise<AutonomyStatus | null> {
+  if (!inTauri) return null;
+  return invoke<AutonomyStatus>("autonomy_state");
+}
+
+export async function autonomySetEnabled(enabled: boolean): Promise<AutonomyStatus> {
+  if (!inTauri) throw new Error("No backend in the browser preview.");
+  return invoke<AutonomyStatus>("autonomy_set_enabled", { enabled });
+}
+
+export async function autonomySetCaps(caps: AutonomyCaps): Promise<AutonomyStatus> {
+  if (!inTauri) throw new Error("No backend in the browser preview.");
+  return invoke<AutonomyStatus>("autonomy_set_caps", { caps });
+}
+
+/// Engages or releases the emergency stop file.
+export async function autonomyStopFile(engage: boolean): Promise<AutonomyStatus> {
+  if (!inTauri) throw new Error("No backend in the browser preview.");
+  return invoke<AutonomyStatus>("autonomy_stop_file", { engage });
+}
+
+/// Dry run — what a cycle would do. Available even while halted.
+export async function autonomyPlan(): Promise<CyclePlan | null> {
+  if (!inTauri) return null;
+  return invoke<CyclePlan>("autonomy_plan");
+}
+
+export async function autonomyRunCycle(): Promise<CycleResult> {
+  if (!inTauri) throw new Error("No backend in the browser preview.");
+  return invoke<CycleResult>("autonomy_run_cycle");
+}
+
 // --- Voice v2: wake word + hands-free conversation ---
 
 export type VoicePhase =

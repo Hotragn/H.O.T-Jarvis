@@ -1296,6 +1296,88 @@ body {
   border-color: var(--accent);
 }
 
+/* --- M3: auto mode panel --- */
+.autonomy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.autonomy-caps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.autonomy-caps b {
+  color: var(--accent);
+  font-weight: 400;
+  font-size: 12px;
+}
+
+.autonomy-plan {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.autonomy-step {
+  display: grid;
+  grid-template-columns: 116px 1fr auto;
+  gap: var(--space-2);
+  align-items: baseline;
+  padding: 5px 6px;
+  border-left: 2px solid var(--accent-2);
+  font-size: 12px;
+}
+
+/* Deferred work is visibly *not* something the loop will do on its own. */
+.autonomy-step[data-deferred="true"] {
+  border-left-color: var(--warn);
+  opacity: 0.85;
+}
+
+.autonomy-step-name {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent-2);
+}
+
+.autonomy-step[data-deferred="true"] .autonomy-step-name {
+  color: var(--warn);
+}
+
+.autonomy-step-reason {
+  color: var(--text-dim);
+  overflow-wrap: break-word;
+}
+
+.autonomy-step-cost {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+/* The emergency stop reads as an emergency stop when engaged. */
+.ghost-btn.danger[data-active="true"] {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
 /* --- command palette --- */
 .palette-veil {
   position: fixed;
