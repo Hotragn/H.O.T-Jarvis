@@ -7,6 +7,7 @@
 //! command handlers free of platform quirks and makes "stop" a single message
 //! rather than cross-thread stream juggling.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -265,6 +266,20 @@ fn open_input_stream(
     Ok(stream)
 }
 
+/// Set to stop an in-flight barge-in watch early.
+///
+/// The watcher holds the microphone, and playback usually ends *before* its
+/// length estimate runs out. Without this it would keep the mic for the
+/// remaining seconds of its budget, and the follow-up capture that should start
+/// immediately after the answer would find the device busy.
+static BARGE_CANCEL: AtomicBool = AtomicBool::new(false);
+
+/// Asks an in-flight `watch_for_barge` to return now. Safe to call when nothing
+/// is watching.
+pub fn cancel_barge_watch() {
+    BARGE_CANCEL.store(true, Ordering::Release);
+}
+
 /// Watches the microphone during playback and returns as soon as someone talks
 /// over the assistant (Voice v3).
 ///
@@ -275,9 +290,18 @@ fn open_input_stream(
 ///
 /// `Ok(Some(echo_level))` means the user interrupted, and carries what the
 /// assistant's own loudness measured, so the UI can explain a room that is too
-/// loud for barge-in to work. `Ok(None)` means playback ran its course.
+/// loud for barge-in to work. `Ok(None)` means playback ran its course, the
+/// budget expired, or the caller cancelled.
+///
+/// The caller is expected to start this once playback has actually begun and to
+/// `cancel_barge_watch` when it ends; see `BARGE_CANCEL`.
 pub fn watch_for_barge(max: Duration) -> Result<Option<f32>, String> {
     const POLL: Duration = Duration::from_millis(20);
+
+    // Clear any cancel left over from a previous answer. Safe here because the
+    // caller starts the watch from the speech `onstart` handler, so a cancel for
+    // *this* playback cannot have been issued yet.
+    BARGE_CANCEL.store(false, Ordering::Release);
 
     let host = cpal::default_host();
     let device = host
@@ -298,6 +322,12 @@ pub fn watch_for_barge(max: Duration) -> Result<Option<f32>, String> {
 
     while started.elapsed() < max {
         std::thread::sleep(POLL);
+
+        // Checked every poll, so the microphone is released within ~20ms of
+        // playback ending rather than at the end of the length estimate.
+        if BARGE_CANCEL.swap(false, Ordering::AcqRel) {
+            break;
+        }
 
         // Drain rather than index-and-clear: the capture callback keeps appending
         // while we work, so clearing the whole buffer would silently throw away

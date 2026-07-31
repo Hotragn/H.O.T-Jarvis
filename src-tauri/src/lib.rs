@@ -1609,6 +1609,18 @@ async fn voice_watch_barge(state: tauri::State<'_, AppState>, max_ms: u32) -> Re
     }
 }
 
+/// Stops an in-flight barge-in watch (Voice v3).
+///
+/// Called when playback ends on its own. Without it the watcher would hold the
+/// microphone for the rest of its length estimate, and the follow-up capture that
+/// should start right after the answer would find the device busy.
+#[tauri::command]
+fn voice_stop_barge_watch() -> Result<(), String> {
+    #[cfg(desktop)]
+    crate::mic::cancel_barge_watch();
+    Ok(())
+}
+
 // --- Confidence v1: calibration tracking (§5.3) ---
 
 /// Grades one answer. This is the only new input calibration needs — the
@@ -2421,6 +2433,7 @@ pub fn run() {
             autonomy_run_cycle,
             voice_session,
             voice_watch_barge,
+            voice_stop_barge_watch,
             voice_hands_free,
             voice_set_wake_phrase,
             voice_heard,

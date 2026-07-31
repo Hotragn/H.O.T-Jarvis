@@ -109,11 +109,19 @@ describe("speechBudgetMs", () => {
     expect(speechBudgetMs(Array(25).fill("word").join(" "))).toBeGreaterThan(10_000);
   });
 
-  it("is bounded at both ends", () => {
-    // An empty answer still gets a floor, and no answer gets an unbounded open
-    // microphone.
+  it("has a floor, so an empty answer still gets a usable window", () => {
     expect(speechBudgetMs("")).toBeGreaterThanOrEqual(4_000);
-    expect(speechBudgetMs(Array(100_000).fill("word").join(" "))).toBeLessThanOrEqual(120_000);
+  });
+
+  it("is bounded because the spoken text is, not because of a clamp", () => {
+    // This is the property that actually stops an unbounded open microphone:
+    // sanitizeForSpeech truncates, so no input can produce an arbitrarily long
+    // budget. Pinning the real ceiling means shipping a longer speech cap can't
+    // silently uncap the watcher.
+    const huge = speechBudgetMs(Array(100_000).fill("word").join(" "));
+    const capped = speechBudgetMs(Array(200).fill("word").join(" "));
+    expect(huge).toBe(capped);
+    expect(huge).toBeLessThan(60_000);
   });
 
   it("ignores markup the way playback does", () => {

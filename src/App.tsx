@@ -18,6 +18,7 @@ import {
   sttStatus,
   sttStop,
   voiceAdvance,
+  voiceStopBargeWatch,
   voiceWatchBarge,
   voiceHandsFree,
   voiceHeard,
@@ -387,21 +388,31 @@ export default function App() {
                 if (settled) return;
                 settled = true;
                 setSpeaking(false);
+                // Release the microphone now. The watcher's budget is only an
+                // estimate of how long the answer takes, and playback almost
+                // always ends first — leaving it running would hold the device
+                // through the follow-up window that opens next.
+                void voiceStopBargeWatch().catch(() => {});
                 voiceAdvance(event).then(setVoice).catch(() => {});
               };
               speak(reply.content, {
-                onstart: () => setSpeaking(true),
+                onstart: () => {
+                  setSpeaking(true);
+                  // Started here, not before `speak`, so the watch can never
+                  // begin after its own cancel: the speech API guarantees
+                  // onstart precedes onend, and finish() is what cancels.
+                  // Bounded by the answer's estimated length as a backstop, so a
+                  // missed onend can't hold the mic indefinitely.
+                  void voiceWatchBarge(speechBudgetMs(reply.content))
+                    .then((interrupted) => {
+                      if (cancelled || !interrupted || settled) return;
+                      stopSpeaking();
+                      finish("interrupted");
+                    })
+                    .catch(() => {});
+                },
                 onend: () => finish("finished_speaking"),
               });
-              // Bounded by the estimated length of the answer plus slack, so the
-              // watcher can never hold the microphone open indefinitely.
-              void voiceWatchBarge(speechBudgetMs(reply.content))
-                .then((interrupted) => {
-                  if (cancelled || !interrupted || settled) return;
-                  stopSpeaking();
-                  finish("interrupted");
-                })
-                .catch(() => {});
             }
           } catch (e) {
             say(String(e));

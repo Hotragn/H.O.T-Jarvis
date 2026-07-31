@@ -93,10 +93,14 @@ export function speak(
 /// long, while undershooting means the tail of a long answer can't be
 /// interrupted, which is exactly when you most want to.
 export function speechBudgetMs(text: string): number {
+  // Measured on the sanitized text, which is what actually gets spoken — and
+  // which sanitizeForSpeech already caps, so the result is inherently bounded
+  // without a second clamp. An explicit Math.min here would be unreachable code
+  // pretending to be a safety net.
   const words = sanitizeForSpeech(text).split(/\s+/).filter(Boolean).length;
   // ~2.5 words/second is slower than any TTS default, so this over-estimates.
   const estimated = (words / 2.5) * 1000;
-  return Math.min(Math.max(estimated + 3_000, 4_000), 120_000);
+  return Math.max(estimated + 3_000, 4_000);
 }
 
 export function stopSpeaking(): void {

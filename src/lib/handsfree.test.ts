@@ -103,11 +103,21 @@ describe("wakePhraseError", () => {
 // Voice v3: barge-in has to be discoverable, and the indicator must not claim the
 // mic is recording when it is only watching loudness.
 describe("barge-in presentation", () => {
-  it("tells the user they can interrupt, but only while speaking", () => {
+  it("tells the user they can interrupt whenever the monitor is on", () => {
+    // The hint follows the monitor flag, not the phase name. Which phases set
+    // that flag is the core's decision, pinned by a Rust test — asserting it
+    // again here against a hand-built session would only restate the fixture.
     expect(
       nextHint(session({ phase: "speaking", needs_wake: false, wants_barge_monitor: true })),
     ).toContain("interrupt");
-    // Not while thinking: there is nothing to talk over yet.
+  });
+
+  it("says nothing about interrupting when the monitor is off", () => {
+    // Same phase, flag off: proves the hint is driven by the flag rather than by
+    // the phase happening to be "speaking".
+    expect(
+      nextHint(session({ phase: "speaking", needs_wake: false, wants_barge_monitor: false })),
+    ).toBeNull();
     expect(
       nextHint(session({ phase: "thinking", needs_wake: false, wants_barge_monitor: false })),
     ).toBeNull();

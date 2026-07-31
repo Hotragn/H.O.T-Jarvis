@@ -128,6 +128,10 @@ Two consequences worth knowing:
   you are, nothing you say can clear the measured floor. Turn the volume down or
   use headphones.
 
+The microphone is released as soon as playback ends, not when the watcher's time
+estimate runs out — otherwise the follow-up window that opens right after an
+answer would find the device still busy.
+
 Nothing captured while it speaks is transcribed or kept. The detector reads
 loudness and throws the audio away frame by frame, so Jarvis still cannot hear
 its own voice into a request — that's the property the closed mic protected in

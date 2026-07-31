@@ -569,6 +569,12 @@ export async function voiceWatchBarge(maxMs: number): Promise<boolean> {
   return invoke<boolean>("voice_watch_barge", { maxMs });
 }
 
+/// Stops an in-flight barge-in watch, releasing the microphone.
+export async function voiceStopBargeWatch(): Promise<void> {
+  if (!inTauri) return;
+  return invoke<void>("voice_stop_barge_watch");
+}
+
 // --- Confidence v1: calibration tracking ---
 
 export interface CalibrationBin {
