@@ -185,6 +185,9 @@ async fn chat_send(state: tauri::State<'_, AppState>, text: String) -> Result<Ch
                 created_at: i.created_at,
                 corroborations: i.corroborations,
                 uses: i.uses,
+                // Scoring for prompt selection is arithmetic on the
+                // bookkeeping; only duplicate detection needs vectors.
+                embedding: None,
             })
             .collect();
         let picked = forgetting::top_for_prompt(&candidates, now_unix(), INSIGHTS_IN_PROMPT);
@@ -598,7 +601,17 @@ async fn run_reflection(state: &AppState) -> Result<Vec<Insight>, String> {
         .map_err(|e| e.to_string())?;
     let drafts = parse_insights(&reply.content).unwrap_or_default();
 
-    let mut stored = Vec::new();
+    // Reflection v2: embed each draft before touching the database, so duplicate
+    // detection can compare meaning rather than vocabulary. Best-effort by
+    // design — no embedding model on disk gives `None`, which falls back to word
+    // overlap instead of failing the whole pass.
+    let mut draft_vectors: Vec<Option<Vec<f32>>> = Vec::with_capacity(drafts.len());
+    for draft in &drafts {
+        draft_vectors.push(state.router.embed(&draft.content).await.ok());
+    }
+
+    let mut stored: Vec<Insight> = Vec::new();
+    let mut to_embed: Vec<(i64, Vec<f32>)> = Vec::new();
     {
         let mem = state.memory.lock().map_err(|e| e.to_string())?;
         let source = format!("events ..{watermark}");
@@ -606,12 +619,32 @@ async fn run_reflection(state: &AppState) -> Result<Vec<Insight>, String> {
         // independent re-derivation is evidence, so credit the existing copy
         // instead — that corroboration is what keeps it alive under decay.
         let existing = mem.recent_insights(500).map_err(|e| e.to_string())?;
-        for draft in &drafts {
-            if let Some(twin) = existing.iter().find(|e| {
-                e.kind == draft.kind
-                    && forgetting::similarity(&e.content, &draft.content)
-                        >= forgetting::DUPLICATE_SIMILARITY
-            }) {
+        let known: Vec<forgetting::Candidate> = existing
+            .iter()
+            .map(|i| forgetting::Candidate {
+                id: i.id,
+                kind: i.kind.clone(),
+                content: i.content.clone(),
+                created_at: i.created_at,
+                corroborations: i.corroborations,
+                uses: i.uses,
+                embedding: mem.insight_embedding(i.id).ok().flatten(),
+            })
+            .collect();
+        for (draft, vector) in drafts.iter().zip(&draft_vectors) {
+            let candidate = forgetting::Candidate {
+                id: 0,
+                kind: draft.kind.clone(),
+                content: draft.content.clone(),
+                created_at: now_unix(),
+                corroborations: 0,
+                uses: 0,
+                embedding: vector.clone(),
+            };
+            if let Some(twin) = known
+                .iter()
+                .find(|k| forgetting::duplicate_match(k, &candidate).is_some())
+            {
                 mem.corroborate_insight(twin.id)
                     .map_err(|e| e.to_string())?;
                 continue;
@@ -619,6 +652,9 @@ async fn run_reflection(state: &AppState) -> Result<Vec<Insight>, String> {
             let id = mem
                 .add_insight(&draft.kind, &draft.content, &source)
                 .map_err(|e| e.to_string())?;
+            if let Some(v) = vector {
+                to_embed.push((id, v.clone()));
+            }
             stored.push(Insight {
                 id,
                 kind: draft.kind.clone(),
@@ -627,7 +663,13 @@ async fn run_reflection(state: &AppState) -> Result<Vec<Insight>, String> {
                 created_at: 0,
                 corroborations: 0,
                 uses: 0,
+                forgotten_at: None,
             });
+        }
+        // Store the vectors alongside the lessons they belong to. A failure here
+        // costs recall quality on the next pass, never the lesson itself.
+        for (id, vector) in &to_embed {
+            let _ = mem.set_insight_embedding(*id, &state.router.embed_model(), vector);
         }
         // Advance the watermark even on an empty harvest so the same events
         // aren't re-digested forever.
@@ -1833,6 +1875,9 @@ fn maintain_insights(state: tauri::State<'_, AppState>) -> Result<forgetting::Fo
                 created_at: i.created_at,
                 corroborations: i.corroborations,
                 uses: i.uses,
+                // Read from disk, never computed here: maintenance must not make
+                // a network call, and a missing vector just falls back to words.
+                embedding: mem.insight_embedding(i.id).ok().flatten(),
             })
             .collect();
         let plan = forgetting::plan(&candidates, now, forgetting::CAPACITY);
@@ -2031,11 +2076,39 @@ async fn index_memory(state: tauri::State<'_, AppState>) -> Result<(u32, u32), S
             .map_err(|e| e.to_string())?;
         indexed += 1;
     }
+    // Reflection v2: lessons get indexed by the same pass, because duplicate
+    // detection by meaning is worthless on a history that predates it. Kept
+    // after the messages so a partial run still improves recall first.
+    let lessons: Vec<Insight> = {
+        let mem = state.memory.lock().map_err(|e| e.to_string())?;
+        let ids = mem
+            .unembedded_insight_ids(BATCH)
+            .map_err(|e| e.to_string())?;
+        mem.recent_insights(usize::MAX / 2)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .filter(|i| ids.contains(&i.id))
+            .collect()
+    };
+    for lesson in &lessons {
+        let vector = state.router.embed(&lesson.content).await?;
+        let mem = state.memory.lock().map_err(|e| e.to_string())?;
+        mem.set_insight_embedding(lesson.id, &state.router.embed_model(), &vector)
+            .map_err(|e| e.to_string())?;
+        indexed += 1;
+    }
+
     let remaining = {
         let mem = state.memory.lock().map_err(|e| e.to_string())?;
-        mem.unembedded_message_ids(usize::MAX / 2)
+        let messages = mem
+            .unembedded_message_ids(usize::MAX / 2)
             .map_err(|e| e.to_string())?
-            .len() as u32
+            .len() as u32;
+        let lessons = mem
+            .unembedded_insight_ids(usize::MAX / 2)
+            .map_err(|e| e.to_string())?
+            .len() as u32;
+        messages + lessons
     };
     if indexed > 0 {
         log_event(
@@ -2045,6 +2118,32 @@ async fn index_memory(state: tauri::State<'_, AppState>) -> Result<(u32, u32), S
         );
     }
     Ok((indexed, remaining))
+}
+
+/// Lessons the app dropped on its own. Shown so forgetting is auditable rather
+/// than something that quietly happens to your memory.
+#[tauri::command]
+fn forgotten_insights(state: tauri::State<'_, AppState>) -> Result<Vec<Insight>, String> {
+    let mem = state.memory.lock().map_err(|e| e.to_string())?;
+    mem.forgotten_insights(200).map_err(|e| e.to_string())
+}
+
+/// Puts a forgotten lesson back. The user overruling the scoring is the point:
+/// the app's judgement about what matters is a guess, and theirs isn't.
+#[tauri::command]
+fn restore_insight(state: tauri::State<'_, AppState>, id: i64) -> Result<bool, String> {
+    let restored = {
+        let mem = state.memory.lock().map_err(|e| e.to_string())?;
+        mem.restore_insight(id).map_err(|e| e.to_string())?
+    };
+    if restored {
+        log_event(
+            &state,
+            "memory.insight_restored",
+            serde_json::json!({ "insight_id": id }),
+        );
+    }
+    Ok(restored)
 }
 
 // --- runtime provider settings (custom models; iOS companion enabler) ---
@@ -2267,6 +2366,8 @@ pub fn run() {
             replay_timeline,
             replay_state_at,
             replay_audit_state,
+            forgotten_insights,
+            restore_insight,
             autonomy_state,
             autonomy_last_beat,
             autonomy_set_enabled,

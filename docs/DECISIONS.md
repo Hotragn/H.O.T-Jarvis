@@ -85,3 +85,28 @@ Owner supplied film-Jarvis reference imagery (wallpapercave.com/jarvis-wallpaper
 - **Prompt/agent files are gitignored** (`.claude/`, `CLAUDE.md`, `docs/agentbrief*`) at the owner's request — continuity files stay local to this machine.
 
 Idea credits for planned hero features (tracked in ROADMAP): Voyager skill library; MUSE-Autoskill; Reflexion; ReasoningBank; "Hindsight is 20/20" agent memory; Mem0 selective memory; "Agentic Uncertainty Reveals Agentic Overconfidence"; 2026 replayable-agent/determinism literature. To be re-read before each respective implementation.
+
+## Reflection v2: meaning-based duplicates, and forgetting you can undo
+
+Duplicate detection was token overlap, which cannot see a paraphrase that shares
+no vocabulary — and reflection produces exactly those. Lessons are now embedded
+when they're created (backfilled by the existing index pass) and compared by
+cosine, falling back to word overlap when either side has no vector. Mismatched
+vector widths also fall back rather than producing a confident wrong number:
+different embedding models are not comparable.
+
+The cosine floor (0.92) is far stricter than the token one (0.6) on purpose.
+Sentence embeddings put any two English sentences about a shared subject at
+0.7-0.85, so a threshold that reads as strict for word overlap merges lessons
+that merely share a topic. The logged reason names the method it used, because
+0.93 overlap and 0.93 cosine mean very different things.
+
+Forgetting became a soft delete (schema v5). The app deciding what matters to
+someone is a guess, and a decay curve is a crude one, so a drop now lands in a
+"forgotten" tab with its reason and can be restored in one click. A hard DELETE
+gave the user no way to disagree with a judgement the app made on its own.
+
+One UI trap worth recording: dimming a dropped card with `opacity` silently did
+nothing, because `.reflect-card` carries an enter animation with fill mode
+`both`, and a filled animation beats a normal declaration. The dimming moved to
+the card's contents, which aren't animated.

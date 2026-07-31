@@ -37,6 +37,9 @@ pub struct Insight {
     pub corroborations: u32,
     /// Times it has been injected into a prompt.
     pub uses: u32,
+    /// When the app decided to drop this lesson, if it has. `None` means live.
+    /// Forgetting is a soft delete so the user can see it and disagree.
+    pub forgotten_at: Option<i64>,
 }
 
 pub struct MemoryStore {
@@ -127,6 +130,27 @@ impl MemoryStore {
                      created_at INTEGER NOT NULL
                  );
                  INSERT INTO schema_version (version) VALUES (4);",
+            )?;
+        }
+        if current < 5 {
+            // Reflection v2. Two additions:
+            //
+            // `forgotten_at` makes forgetting a soft delete. A lesson the app
+            // decided to drop on its own should be inspectable and reversible,
+            // and a DELETE gave the user no way to disagree.
+            //
+            // `insight_embeddings` mirrors the message embeddings table, with
+            // the same `model` column for the same reason: vectors from
+            // different embedding models must never be compared.
+            conn.execute_batch(
+                "ALTER TABLE insights ADD COLUMN forgotten_at INTEGER;
+                 CREATE TABLE IF NOT EXISTS insight_embeddings (
+                     insight_id INTEGER PRIMARY KEY,
+                     model      TEXT NOT NULL,
+                     vector     BLOB NOT NULL,
+                     created_at INTEGER NOT NULL
+                 );
+                 INSERT INTO schema_version (version) VALUES (5);",
             )?;
         }
         Ok(())
@@ -220,9 +244,13 @@ impl MemoryStore {
 
     /// Forgets a lesson. Selective forgetting is the point of Reflection v1;
     /// the caller logs what went and why, so it stays auditable.
+    /// Marks a lesson forgotten. A soft delete on purpose: the app decided this
+    /// on its own, so the user needs to be able to see it and disagree.
     pub fn forget_insight(&self, id: i64) -> Result<(), MemoryError> {
-        self.conn
-            .execute("DELETE FROM insights WHERE id = ?1", params![id])?;
+        self.conn.execute(
+            "UPDATE insights SET forgotten_at = ?2 WHERE id = ?1 AND forgotten_at IS NULL",
+            params![id, now_unix()],
+        )?;
         Ok(())
     }
 
@@ -314,7 +342,8 @@ impl MemoryStore {
     /// Newest lessons first — the freshest experience matters most.
     pub fn recent_insights(&self, limit: usize) -> Result<Vec<Insight>, MemoryError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, kind, content, source, created_at, corroborations, uses FROM insights
+            "SELECT id, kind, content, source, created_at, corroborations, uses, forgotten_at
+             FROM insights WHERE forgotten_at IS NULL
              ORDER BY id DESC LIMIT ?1",
         )?;
         let rows: Vec<Insight> = stmt
@@ -327,17 +356,101 @@ impl MemoryStore {
                     created_at: r.get(4)?,
                     corroborations: r.get(5)?,
                     uses: r.get(6)?,
+                    forgotten_at: r.get(7)?,
                 })
             })?
             .collect::<Result<_, _>>()?;
         Ok(rows)
     }
 
-    pub fn insight_count(&self) -> Result<u64, MemoryError> {
-        Ok(self
+    /// Brings a forgotten lesson back. Returns whether it was actually forgotten,
+    /// so the caller can tell "restored" from "there was nothing to restore".
+    pub fn restore_insight(&self, id: i64) -> Result<bool, MemoryError> {
+        let affected = self.conn.execute(
+            "UPDATE insights SET forgotten_at = NULL WHERE id = ?1 AND forgotten_at IS NOT NULL",
+            params![id],
+        )?;
+        Ok(affected > 0)
+    }
+
+    /// Lessons the app dropped, most recently forgotten first.
+    pub fn forgotten_insights(&self, limit: usize) -> Result<Vec<Insight>, MemoryError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, kind, content, source, created_at, corroborations, uses, forgotten_at
+             FROM insights WHERE forgotten_at IS NOT NULL
+             ORDER BY forgotten_at DESC, id DESC LIMIT ?1",
+        )?;
+        let rows: Vec<Insight> = stmt
+            .query_map(params![limit as i64], |r| {
+                Ok(Insight {
+                    id: r.get(0)?,
+                    kind: r.get(1)?,
+                    content: r.get(2)?,
+                    source: r.get(3)?,
+                    created_at: r.get(4)?,
+                    corroborations: r.get(5)?,
+                    uses: r.get(6)?,
+                    forgotten_at: r.get(7)?,
+                })
+            })?
+            .collect::<Result<_, _>>()?;
+        Ok(rows)
+    }
+
+    /// Stores a lesson's embedding. Replaces any existing one, so re-indexing
+    /// after a model change overwrites rather than accumulating.
+    pub fn set_insight_embedding(
+        &self,
+        insight_id: i64,
+        model: &str,
+        vector: &[f32],
+    ) -> Result<(), MemoryError> {
+        self.conn.execute(
+            "INSERT INTO insight_embeddings (insight_id, model, vector, created_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(insight_id) DO UPDATE SET model = ?2, vector = ?3, created_at = ?4",
+            params![
+                insight_id,
+                model,
+                crate::core::embedding::to_bytes(vector),
+                now_unix()
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn insight_embedding(&self, insight_id: i64) -> Result<Option<Vec<f32>>, MemoryError> {
+        let raw: Option<Vec<u8>> = self
             .conn
-            .query_row("SELECT COUNT(*) FROM insights", [], |r| r.get::<_, i64>(0))?
-            as u64)
+            .query_row(
+                "SELECT vector FROM insight_embeddings WHERE insight_id = ?1",
+                params![insight_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(raw.and_then(|b| crate::core::embedding::from_bytes(&b)))
+    }
+
+    /// Live lessons with no embedding yet, for the backfill pass.
+    pub fn unembedded_insight_ids(&self, limit: usize) -> Result<Vec<i64>, MemoryError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT i.id FROM insights i
+             LEFT JOIN insight_embeddings e ON e.insight_id = i.id
+             WHERE e.insight_id IS NULL AND i.forgotten_at IS NULL
+             ORDER BY i.id DESC LIMIT ?1",
+        )?;
+        let ids: Vec<i64> = stmt
+            .query_map(params![limit as i64], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+        Ok(ids)
+    }
+
+    pub fn insight_count(&self) -> Result<u64, MemoryError> {
+        Ok(self.conn.query_row(
+            "SELECT COUNT(*) FROM insights WHERE forgotten_at IS NULL",
+            [],
+            |r| r.get::<_, i64>(0),
+        )? as u64)
     }
 
     /// Removes one message (undo support). Returns whether a row existed.
@@ -382,8 +495,10 @@ impl MemoryStore {
 
     /// Deletes all user data but keeps the schema — the user's call, always.
     pub fn wipe(&self) -> Result<(), MemoryError> {
-        self.conn
-            .execute_batch("DELETE FROM facts; DELETE FROM messages; DELETE FROM insights;")?;
+        self.conn.execute_batch(
+            "DELETE FROM facts; DELETE FROM messages; DELETE FROM insights;
+                 DELETE FROM insight_embeddings;",
+        )?;
         Ok(())
     }
 }
@@ -428,9 +543,10 @@ mod tests {
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
                 .unwrap();
-            // Bump both when a migration is added: v4 adds the embeddings table.
-            assert_eq!(version, 4, "schema is at the current version");
-            assert_eq!(rows, 4, "one row per migration step, never re-run");
+            // Bump both when a migration is added: v5 adds soft-deleted lessons
+            // and the lesson embeddings table.
+            assert_eq!(version, 5, "schema is at the current version");
+            assert_eq!(rows, 5, "one row per migration step, never re-run");
         }
     }
 
@@ -622,6 +738,148 @@ mod tests {
         // And the new bookkeeping works on the migrated row.
         store.corroborate_insight(all[0].id).unwrap();
         assert_eq!(store.recent_insights(10).unwrap()[0].corroborations, 1);
+    }
+
+    #[test]
+    fn forgetting_is_reversible() {
+        // The app decides this on its own, so the user has to be able to see it
+        // and disagree. A hard DELETE gave them no way to.
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::open(&dir.path().join("m.sqlite3")).unwrap();
+        let id = store
+            .add_insight("user", "prefers short answers", "e1")
+            .unwrap();
+        store.forget_insight(id).unwrap();
+
+        assert!(
+            store.recent_insights(10).unwrap().is_empty(),
+            "a forgotten lesson is out of the live set"
+        );
+        assert_eq!(store.insight_count().unwrap(), 0, "and out of the count");
+        let gone = store.forgotten_insights(10).unwrap();
+        assert_eq!(gone.len(), 1, "but still on the record");
+        assert!(gone[0].forgotten_at.is_some());
+        assert_eq!(gone[0].content, "prefers short answers");
+
+        assert!(store.restore_insight(id).unwrap());
+        assert_eq!(store.recent_insights(10).unwrap().len(), 1);
+        assert!(store.forgotten_insights(10).unwrap().is_empty());
+        assert!(
+            store.recent_insights(10).unwrap()[0].forgotten_at.is_none(),
+            "a restored lesson reads as live"
+        );
+    }
+
+    #[test]
+    fn restoring_reports_whether_there_was_anything_to_restore() {
+        // "Restored" and "there was nothing to restore" must be distinguishable,
+        // or the UI has to guess what happened.
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::open(&dir.path().join("m.sqlite3")).unwrap();
+        let id = store.add_insight("user", "a live lesson", "e1").unwrap();
+        assert!(
+            !store.restore_insight(id).unwrap(),
+            "it was never forgotten"
+        );
+        assert!(!store.restore_insight(9_999).unwrap(), "no such lesson");
+    }
+
+    #[test]
+    fn forgetting_twice_keeps_the_first_timestamp() {
+        // Otherwise a maintenance pass that re-drops an already-dropped lesson
+        // would keep bumping it to the top of the forgotten list forever.
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::open(&dir.path().join("m.sqlite3")).unwrap();
+        let id = store.add_insight("user", "a lesson", "e1").unwrap();
+        store.forget_insight(id).unwrap();
+        let first = store.forgotten_insights(10).unwrap()[0].forgotten_at;
+        store.forget_insight(id).unwrap();
+        assert_eq!(store.forgotten_insights(10).unwrap()[0].forgotten_at, first);
+    }
+
+    #[test]
+    fn lesson_embeddings_roundtrip_and_backfill_finds_the_gaps() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::open(&dir.path().join("m.sqlite3")).unwrap();
+        let a = store.add_insight("skill", "lesson a", "e1").unwrap();
+        let b = store.add_insight("skill", "lesson b", "e2").unwrap();
+
+        assert_eq!(store.unembedded_insight_ids(10).unwrap().len(), 2);
+        store
+            .set_insight_embedding(a, "nomic", &[0.5, -0.25])
+            .unwrap();
+        let got = store.insight_embedding(a).unwrap().unwrap();
+        assert_eq!(got, vec![0.5, -0.25], "exact f32 roundtrip");
+        assert_eq!(store.unembedded_insight_ids(10).unwrap(), vec![b]);
+        assert!(store.insight_embedding(b).unwrap().is_none());
+
+        // Re-indexing replaces rather than accumulating.
+        store.set_insight_embedding(a, "nomic", &[1.0]).unwrap();
+        assert_eq!(store.insight_embedding(a).unwrap().unwrap(), vec![1.0]);
+
+        // A forgotten lesson isn't work for the backfill pass.
+        store.forget_insight(b).unwrap();
+        assert!(store.unembedded_insight_ids(10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_v4_database_gains_soft_deletes_without_losing_lessons() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("v4.sqlite3");
+        {
+            // A v4 database: insights with the v3 scoring columns, no forgotten_at.
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE schema_version (version INTEGER NOT NULL);
+                 CREATE TABLE facts (key TEXT PRIMARY KEY, value TEXT NOT NULL,
+                                     updated_at INTEGER NOT NULL);
+                 CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                        role TEXT NOT NULL, content TEXT NOT NULL,
+                                        created_at INTEGER NOT NULL);
+                 CREATE TABLE insights (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                        kind TEXT NOT NULL, content TEXT NOT NULL,
+                                        source TEXT NOT NULL DEFAULT '',
+                                        created_at INTEGER NOT NULL,
+                                        corroborations INTEGER NOT NULL DEFAULT 0,
+                                        uses INTEGER NOT NULL DEFAULT 0);
+                 CREATE TABLE embeddings (message_id INTEGER PRIMARY KEY, model TEXT NOT NULL,
+                                          vector BLOB NOT NULL, created_at INTEGER NOT NULL);
+                 INSERT INTO insights (kind, content, source, created_at, corroborations, uses)
+                     VALUES ('user', 'a lesson from before v5', 'e1', 1, 2, 3);
+                 INSERT INTO schema_version (version) VALUES (4);",
+            )
+            .unwrap();
+        }
+        let store = MemoryStore::open(&path).unwrap();
+        let all = store.recent_insights(10).unwrap();
+        assert_eq!(all.len(), 1, "the existing lesson must survive");
+        assert_eq!(all[0].content, "a lesson from before v5");
+        assert_eq!(all[0].corroborations, 2, "earlier bookkeeping is intact");
+        assert_eq!(all[0].uses, 3);
+        assert!(
+            all[0].forgotten_at.is_none(),
+            "a lesson that predates soft deletes reads as live, not as forgotten"
+        );
+        // And the new behaviour works on the migrated row.
+        store.forget_insight(all[0].id).unwrap();
+        assert_eq!(store.forgotten_insights(10).unwrap().len(), 1);
+        store
+            .set_insight_embedding(all[0].id, "nomic", &[0.1])
+            .unwrap();
+        assert!(store.insight_embedding(all[0].id).unwrap().is_some());
+    }
+
+    #[test]
+    fn a_wipe_clears_lesson_vectors_too() {
+        // Otherwise "wipe my memory" leaves embeddings of the wiped lessons on
+        // disk, which is exactly the promise it breaks.
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryStore::open(&dir.path().join("m.sqlite3")).unwrap();
+        let id = store.add_insight("user", "a lesson", "e1").unwrap();
+        store.set_insight_embedding(id, "nomic", &[0.5]).unwrap();
+        store.wipe().unwrap();
+        assert!(store.insight_embedding(id).unwrap().is_none());
+        assert!(store.forgotten_insights(10).unwrap().is_empty());
     }
 
     #[test]
