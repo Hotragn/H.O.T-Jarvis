@@ -7,6 +7,7 @@
 //! command handlers free of platform quirks and makes "stop" a single message
 //! rather than cross-thread stream juggling.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -157,47 +158,7 @@ pub fn listen_until_endpoint(
     let channels = config.channels();
 
     let buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
-    let sink = Arc::clone(&buffer);
-    let on_error = |e| eprintln!("microphone stream error: {e}");
-
-    let stream = match config.sample_format() {
-        cpal::SampleFormat::F32 => device.build_input_stream(
-            &config.into(),
-            move |data: &[f32], _: &_| append(&sink, data.iter().copied()),
-            on_error,
-            None,
-        ),
-        cpal::SampleFormat::I16 => device.build_input_stream(
-            &config.into(),
-            move |data: &[i16], _: &_| {
-                append(&sink, data.iter().map(|s| *s as f32 / i16::MAX as f32))
-            },
-            on_error,
-            None,
-        ),
-        cpal::SampleFormat::U16 => device.build_input_stream(
-            &config.into(),
-            move |data: &[u16], _: &_| {
-                append(
-                    &sink,
-                    data.iter()
-                        .map(|s| (*s as f32 / u16::MAX as f32) * 2.0 - 1.0),
-                )
-            },
-            on_error,
-            None,
-        ),
-        other => Err(cpal::BuildStreamError::BackendSpecific {
-            err: cpal::BackendSpecificError {
-                description: format!("unsupported sample format {other:?}"),
-            },
-        }),
-    }
-    .map_err(|e| format!("could not open the microphone: {e}"))?;
-
-    stream
-        .play()
-        .map_err(|e| format!("could not start the microphone: {e}"))?;
+    let stream = open_input_stream(&device, config, Arc::clone(&buffer))?;
 
     // The endpointer works on mono frames at the device rate; downmix as we go
     // so its energy maths sees what a listener would hear.
@@ -253,6 +214,152 @@ pub fn listen_until_endpoint(
         sample_rate,
         channels,
     }))
+}
+
+/// Opens and starts an input stream that appends normalized f32 samples to
+/// `sink`. Shared by every capture path so a new one can't drift on sample
+/// format handling.
+fn open_input_stream(
+    device: &cpal::Device,
+    config: cpal::SupportedStreamConfig,
+    sink: Arc<Mutex<Vec<f32>>>,
+) -> Result<cpal::Stream, String> {
+    let on_error = |e| eprintln!("microphone stream error: {e}");
+    let format = config.sample_format();
+    let stream = match format {
+        cpal::SampleFormat::F32 => device.build_input_stream(
+            &config.into(),
+            move |data: &[f32], _: &_| append(&sink, data.iter().copied()),
+            on_error,
+            None,
+        ),
+        cpal::SampleFormat::I16 => device.build_input_stream(
+            &config.into(),
+            move |data: &[i16], _: &_| {
+                append(&sink, data.iter().map(|s| *s as f32 / i16::MAX as f32))
+            },
+            on_error,
+            None,
+        ),
+        cpal::SampleFormat::U16 => device.build_input_stream(
+            &config.into(),
+            move |data: &[u16], _: &_| {
+                append(
+                    &sink,
+                    data.iter()
+                        .map(|s| (*s as f32 / u16::MAX as f32) * 2.0 - 1.0),
+                )
+            },
+            on_error,
+            None,
+        ),
+        other => Err(cpal::BuildStreamError::BackendSpecific {
+            err: cpal::BackendSpecificError {
+                description: format!("unsupported sample format {other:?}"),
+            },
+        }),
+    }
+    .map_err(|e| format!("could not open the microphone: {e}"))?;
+    stream
+        .play()
+        .map_err(|e| format!("could not start the microphone: {e}"))?;
+    Ok(stream)
+}
+
+/// Set to stop an in-flight barge-in watch early.
+///
+/// The watcher holds the microphone, and playback usually ends *before* its
+/// length estimate runs out. Without this it would keep the mic for the
+/// remaining seconds of its budget, and the follow-up capture that should start
+/// immediately after the answer would find the device busy.
+static BARGE_CANCEL: AtomicBool = AtomicBool::new(false);
+
+/// Asks an in-flight `watch_for_barge` to return now. Safe to call when nothing
+/// is watching.
+pub fn cancel_barge_watch() {
+    BARGE_CANCEL.store(true, Ordering::Release);
+}
+
+/// Watches the microphone during playback and returns as soon as someone talks
+/// over the assistant (Voice v3).
+///
+/// Deliberately returns loudness, never audio: nothing captured here is kept or
+/// transcribed, so the assistant cannot hear its own voice into a request. That
+/// is the property `Phase::wants_audio` protects, and this path must not weaken
+/// it — see `core::bargein` for how the echo is measured rather than assumed.
+///
+/// `Ok(Some(echo_level))` means the user interrupted, and carries what the
+/// assistant's own loudness measured, so the UI can explain a room that is too
+/// loud for barge-in to work. `Ok(None)` means playback ran its course, the
+/// budget expired, or the caller cancelled.
+///
+/// The caller is expected to start this once playback has actually begun and to
+/// `cancel_barge_watch` when it ends; see `BARGE_CANCEL`.
+pub fn watch_for_barge(max: Duration) -> Result<Option<f32>, String> {
+    const POLL: Duration = Duration::from_millis(20);
+
+    // Clear any cancel left over from a previous answer. Safe here because the
+    // caller starts the watch from the speech `onstart` handler, so a cancel for
+    // *this* playback cannot have been issued yet.
+    BARGE_CANCEL.store(false, Ordering::Release);
+
+    let host = cpal::default_host();
+    let device = host
+        .default_input_device()
+        .ok_or("no microphone found — check your input device")?;
+    let config = device
+        .default_input_config()
+        .map_err(|e| format!("microphone has no usable format: {e}"))?;
+    let sample_rate = config.sample_rate().0;
+    let channels = config.channels();
+
+    let buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
+    let stream = open_input_stream(&device, config, Arc::clone(&buffer))?;
+
+    let mut detector = crate::core::bargein::Detector::new();
+    let started = std::time::Instant::now();
+    let mut interrupted = false;
+
+    while started.elapsed() < max {
+        std::thread::sleep(POLL);
+
+        // Checked every poll, so the microphone is released within ~20ms of
+        // playback ending rather than at the end of the length estimate.
+        if BARGE_CANCEL.swap(false, Ordering::AcqRel) {
+            break;
+        }
+
+        // Drain rather than index-and-clear: the capture callback keeps appending
+        // while we work, so clearing the whole buffer would silently throw away
+        // frames that arrived mid-loop. Draining takes exactly what was read.
+        //
+        // Draining at all is the point: nothing captured here is kept. Holding on
+        // to it would make this a recording of the assistant talking, which is
+        // precisely what this path exists to avoid.
+        let chunk: Vec<f32> = {
+            let mut buf = buffer.lock().map_err(|e| e.to_string())?;
+            if buf.is_empty() {
+                continue;
+            }
+            buf.drain(..).collect()
+        };
+
+        let mono = audio::downmix_to_mono(&chunk, channels);
+        let frame_ms = ((mono.len() as f32 / sample_rate as f32) * 1000.0).round() as u32;
+        if frame_ms == 0 {
+            continue;
+        }
+        if detector.frame(audio::rms(&mono), frame_ms) == crate::core::bargein::Barge::Interrupt {
+            interrupted = true;
+            break;
+        }
+    }
+
+    drop(stream);
+    if let Ok(mut buf) = buffer.lock() {
+        buf.clear();
+    }
+    Ok(interrupted.then(|| detector.echo_level().unwrap_or(0.0)))
 }
 
 /// Name of the default input device, for the UI. `None` when there isn't one.

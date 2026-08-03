@@ -18,6 +18,8 @@ import {
   sttStatus,
   sttStop,
   voiceAdvance,
+  voiceStopBargeWatch,
+  voiceWatchBarge,
   voiceHandsFree,
   voiceHeard,
   voiceSession,
@@ -41,6 +43,7 @@ import {
   chooseSttRoute,
   recognitionCtor,
   speak,
+  speechBudgetMs,
   stopSpeaking,
   STT_UNAVAILABLE_MESSAGE,
   sttAvailable,
@@ -375,12 +378,40 @@ export default function App() {
             const spoken = voiceOn && !!reply.content;
             await voiceAdvance(spoken ? "answered_speaking" : "answered_silent").then(setVoice);
             if (spoken) {
+              // Voice v3: playback and the barge-in watcher run together, and
+              // whichever finishes first ends the turn. `settled` is the guard —
+              // without it a natural ending and an interruption could both
+              // advance the session, and the second one would move a session
+              // that had already gone on to something else.
+              let settled = false;
+              const finish = (event: "finished_speaking" | "interrupted") => {
+                if (settled) return;
+                settled = true;
+                setSpeaking(false);
+                // Release the microphone now. The watcher's budget is only an
+                // estimate of how long the answer takes, and playback almost
+                // always ends first — leaving it running would hold the device
+                // through the follow-up window that opens next.
+                void voiceStopBargeWatch().catch(() => {});
+                voiceAdvance(event).then(setVoice).catch(() => {});
+              };
               speak(reply.content, {
-                onstart: () => setSpeaking(true),
-                onend: () => {
-                  setSpeaking(false);
-                  voiceAdvance("finished_speaking").then(setVoice).catch(() => {});
+                onstart: () => {
+                  setSpeaking(true);
+                  // Started here, not before `speak`, so the watch can never
+                  // begin after its own cancel: the speech API guarantees
+                  // onstart precedes onend, and finish() is what cancels.
+                  // Bounded by the answer's estimated length as a backstop, so a
+                  // missed onend can't hold the mic indefinitely.
+                  void voiceWatchBarge(speechBudgetMs(reply.content))
+                    .then((interrupted) => {
+                      if (cancelled || !interrupted || settled) return;
+                      stopSpeaking();
+                      finish("interrupted");
+                    })
+                    .catch(() => {});
                 },
+                onend: () => finish("finished_speaking"),
               });
             }
           } catch (e) {

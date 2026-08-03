@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { chooseSttRoute, pickVoice, sanitizeForSpeech, sttHint } from "./voice";
+import {
+  chooseSttRoute,
+  pickVoice,
+  sanitizeForSpeech,
+  speechBudgetMs,
+  sttHint,
+} from "./voice";
 
 describe("pickVoice", () => {
   const voice = (name: string, lang: string) => ({ name, lang });
@@ -84,5 +90,44 @@ describe("sttHint", () => {
     for (const route of ["local", "download", "web", "none"] as const) {
       expect(sttHint(route).length).toBeGreaterThan(0);
     }
+  });
+});
+
+// Voice v3: the barge-in watcher holds the microphone open, so its budget must
+// never outlive the playback it guards.
+describe("speechBudgetMs", () => {
+  it("scales with the length of the answer", () => {
+    const short = speechBudgetMs("Yes.");
+    const long = speechBudgetMs(Array(200).fill("word").join(" "));
+    expect(long).toBeGreaterThan(short);
+  });
+
+  it("over-estimates rather than cutting playback short", () => {
+    // Undershooting means the tail of a long answer can't be interrupted, which
+    // is exactly when you most want to. 25 words at any real TTS rate is under
+    // 10s, so the budget must comfortably exceed that.
+    expect(speechBudgetMs(Array(25).fill("word").join(" "))).toBeGreaterThan(10_000);
+  });
+
+  it("has a floor, so an empty answer still gets a usable window", () => {
+    expect(speechBudgetMs("")).toBeGreaterThanOrEqual(4_000);
+  });
+
+  it("is bounded because the spoken text is, not because of a clamp", () => {
+    // This is the property that actually stops an unbounded open microphone:
+    // sanitizeForSpeech truncates, so no input can produce an arbitrarily long
+    // budget. Pinning the real ceiling means shipping a longer speech cap can't
+    // silently uncap the watcher.
+    const huge = speechBudgetMs(Array(100_000).fill("word").join(" "));
+    const capped = speechBudgetMs(Array(200).fill("word").join(" "));
+    expect(huge).toBe(capped);
+    expect(huge).toBeLessThan(60_000);
+  });
+
+  it("ignores markup the way playback does", () => {
+    // The budget has to match what is actually spoken, not the raw text: code
+    // fences and asterisks are stripped before speaking.
+    const plain = speechBudgetMs("hello there friend");
+    expect(speechBudgetMs("**hello** *there* `friend`")).toBe(plain);
   });
 });

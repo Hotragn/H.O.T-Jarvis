@@ -110,3 +110,37 @@ One UI trap worth recording: dimming a dropped card with `opacity` silently did
 nothing, because `.reflect-card` carries an enter animation with fill mode
 `both`, and a filled animation beats a normal declaration. The dimming moved to
 the card's contents, which aren't animated.
+## Voice v3 barge-in: calibrate against the echo, never transcribe
+
+Voice v2 closed the microphone while the assistant spoke, which is the right
+default — an open mic during playback is how a hands-free loop starts answering
+its own voice — but it also made interrupting impossible, and being unable to cut
+off a wrong answer is the worst moment to be stuck.
+
+The obstacle is echo. With no AEC, a mic next to a speaker hears the assistant at
+least as loudly as the user, so a fixed threshold either fires on the assistant's
+own voice or needs a shout. `core::bargein` measures instead: for the first
+half-second of playback it only calibrates, learning how loud this assistant is
+in this room at this volume, and the threshold is a multiple of the mean-and-peak
+blend of that measurement. A sustain window separates a person starting a
+sentence from a cough or a door.
+
+Two properties were treated as non-negotiable. It fires at most once per answer,
+because the tail of the same sentence would otherwise produce a stream of
+duplicate interruptions. And it never transcribes: audio is read for loudness and
+dropped frame by frame, so `Phase::wants_audio` still excludes Speaking and the
+assistant cannot hear itself into a request. `wants_barge_monitor` is a separate
+flag for exactly that reason, and `isCapturing` deliberately does not include it
+— the capture indicator is a privacy signal, and claiming a recording during
+loudness monitoring would be a lie.
+
+Where it genuinely does not work is documented rather than papered over: on a
+laptop at high volume the echo floor can exceed normal speech, and no amount of
+threshold tuning fixes that. Headphones make it near-perfect.
+
+The frontend races playback against the watcher with a `settled` guard, because a
+natural ending and an interruption could otherwise both advance the session and
+the second would move a session that had already gone on to something else. The
+watcher's budget is estimated from answer length (`speechBudgetMs`) and
+deliberately over-estimates: overshooting keeps the mic open a few seconds too
+long, while undershooting means the tail of a long answer cannot be interrupted.

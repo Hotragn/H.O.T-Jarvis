@@ -1412,6 +1412,10 @@ struct VoiceSession {
     /// Whether the mic should be open right now — the UI mirrors this rather
     /// than deciding for itself.
     wants_audio: bool,
+    /// Whether the mic should be watching loudness (not transcribing) right now.
+    /// Distinct from `wants_audio` on purpose: this is the barge-in monitor, and
+    /// nothing it hears is ever sent to a model.
+    wants_barge_monitor: bool,
     needs_wake: bool,
     follow_up_remaining_ms: u32,
 }
@@ -1422,6 +1426,7 @@ fn snapshot(session: &crate::core::conversation::Session) -> VoiceSession {
         phase: session.phase(),
         wake_phrase: session.wake_phrase().to_string(),
         wants_audio: session.phase().wants_audio(),
+        wants_barge_monitor: session.phase().wants_barge_monitor(),
         needs_wake: session.phase().needs_wake(),
         follow_up_remaining_ms: session.follow_up_remaining_ms(),
     }
@@ -1553,6 +1558,8 @@ fn voice_advance(
             "answered_silent" => session.answered(false),
             "finished_speaking" => session.finished_speaking(),
             "failed" => session.failed(),
+            // Voice v3: the user talked over the answer.
+            "interrupted" => session.interrupted(),
             "tick" => session.tick(elapsed_ms.unwrap_or(0)),
             other => return Err(format!("unknown voice event '{other}'")),
         };
@@ -1563,6 +1570,55 @@ fn voice_advance(
         let _ = (state, event, elapsed_ms);
         Err(MOBILE_NO_CAPTURE.into())
     }
+}
+
+/// Watches for the user talking over the assistant, for at most `max_ms`
+/// (Voice v3).
+///
+/// Returns true if someone interrupted. Loudness only: nothing captured on this
+/// path is kept or transcribed, so the assistant still cannot hear its own voice
+/// into a request — the property `Phase::wants_audio` protects. The echo level it
+/// measured is logged so a room too loud for barge-in can be diagnosed rather
+/// than just appearing broken.
+#[tauri::command]
+async fn voice_watch_barge(state: tauri::State<'_, AppState>, max_ms: u32) -> Result<bool, String> {
+    #[cfg(desktop)]
+    {
+        // Bounded: a stuck watcher would hold the microphone open indefinitely,
+        // which is the one thing an open mic must never do.
+        let capped = max_ms.clamp(500, 120_000);
+        let found = tauri::async_runtime::spawn_blocking(move || {
+            crate::mic::watch_for_barge(std::time::Duration::from_millis(capped as u64))
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+
+        if let Some(echo) = found {
+            log_event(
+                &state,
+                "voice.barged_in",
+                serde_json::json!({ "echo_level": echo }),
+            );
+        }
+        Ok(found.is_some())
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = (state, max_ms);
+        Err(MOBILE_NO_CAPTURE.into())
+    }
+}
+
+/// Stops an in-flight barge-in watch (Voice v3).
+///
+/// Called when playback ends on its own. Without it the watcher would hold the
+/// microphone for the rest of its length estimate, and the follow-up capture that
+/// should start right after the answer would find the device busy.
+#[tauri::command]
+fn voice_stop_barge_watch() -> Result<(), String> {
+    #[cfg(desktop)]
+    crate::mic::cancel_barge_watch();
+    Ok(())
 }
 
 // --- Confidence v1: calibration tracking (§5.3) ---
@@ -2376,6 +2432,8 @@ pub fn run() {
             autonomy_plan,
             autonomy_run_cycle,
             voice_session,
+            voice_watch_barge,
+            voice_stop_barge_watch,
             voice_hands_free,
             voice_set_wake_phrase,
             voice_heard,
