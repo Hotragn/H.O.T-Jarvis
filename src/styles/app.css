@@ -906,6 +906,12 @@ body {
 .reflections-view [data-kind="all"] {
   --k: var(--accent);
 }
+/* The forgotten view: present, deliberately quiet. A drop the app made on its
+   own shouldn't shout, but it must be findable. */
+.reflections-view [data-kind="forgotten"] {
+  --k: var(--text-dim);
+}
+
 .reflections-view [data-kind="general"] {
   --k: var(--text-dim);
 }
@@ -944,6 +950,38 @@ body {
 .reflect-chip:disabled {
   opacity: 0.35;
   cursor: default;
+}
+
+/* A dropped lesson reads as inactive without becoming unreadable — it's still
+   evidence, and the user may want it back.
+
+   Deliberately not `opacity` on the card: .reflect-card's enter animation uses
+   fill mode `both`, and a filled animation beats a normal declaration, so a
+   static opacity here would be silently overridden once the animation settled.
+   Dimming the contents works because they aren't animated. */
+.reflect-card[data-dropped="true"] {
+  border-style: dashed;
+}
+
+.reflect-card[data-dropped="true"] .reflect-text,
+.reflect-card[data-dropped="true"] .reflect-source {
+  color: var(--text-dim);
+}
+
+.reflect-card[data-dropped="true"] .reflect-badge {
+  opacity: 0.55;
+}
+
+.reflect-dropped {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
 }
 
 .reflect-chip-count {

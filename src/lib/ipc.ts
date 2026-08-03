@@ -257,12 +257,19 @@ export interface Insight {
   corroborations: number;
   /// Times it has been injected into a prompt.
   uses: number;
+  /// When the app dropped this lesson, if it has. Null means live. Forgetting is
+  /// a soft delete, so a drop can be inspected and reversed.
+  forgotten_at: number | null;
 }
+
+/// How two lessons were judged the same. The two scales aren't comparable: 0.8 is
+/// a strong word overlap and a weak meaning match.
+export type ForgetMatch = { by: "meaning"; score: number } | { by: "words"; score: number };
 
 export interface ForgetMerge {
   keep_id: number;
   drop_id: number;
-  similarity: number;
+  matched: ForgetMatch;
 }
 
 /// What a maintenance pass did: duplicates collapsed, spent lessons dropped.
@@ -281,6 +288,18 @@ export async function maintainInsights(): Promise<ForgetPlan | null> {
 export async function listInsights(limit = 50): Promise<Insight[]> {
   if (!inTauri) return [];
   return invoke<Insight[]>("list_insights", { limit });
+}
+
+/// Lessons the app dropped on its own, newest drop first.
+export async function forgottenInsights(): Promise<Insight[]> {
+  if (!inTauri) return [];
+  return invoke<Insight[]>("forgotten_insights");
+}
+
+/// Puts a forgotten lesson back. False means there was nothing to restore.
+export async function restoreInsight(id: number): Promise<boolean> {
+  if (!inTauri) throw new Error("No backend in the browser preview.");
+  return invoke<boolean>("restore_insight", { id });
 }
 
 export async function reflectNow(): Promise<Insight[]> {

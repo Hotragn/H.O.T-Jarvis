@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import CalibrationPanel from "../components/CalibrationPanel";
 import {
   calibrationReport,
+  forgottenInsights,
   inTauri,
   listInsights,
   maintainInsights,
   reflectNow,
+  restoreInsight,
   type CalibrationReport,
   type Insight,
 } from "../lib/ipc";
@@ -14,7 +16,9 @@ import {
 // Order here is the order the filter chips appear in.
 const KINDS = ["skill", "provider", "user", "general"] as const;
 type Kind = (typeof KINDS)[number];
-type Filter = "all" | Kind;
+// "forgotten" is a view of the drops, not a kind — the app's own decisions are
+// worth their own tab, because they're the ones the user might want to overrule.
+type Filter = "all" | Kind | "forgotten";
 
 const KIND_BLURB: Record<Kind, string> = {
   skill: "what worked or broke while writing and running skills",
@@ -35,6 +39,8 @@ function readSource(source: string): string {
 // controls to trigger a fresh pass.
 export default function ReflectionsView() {
   const [insights, setInsights] = useState<Insight[]>([]);
+  const [forgotten, setForgotten] = useState<Insight[]>([]);
+  const [restoring, setRestoring] = useState<number | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [reflecting, setReflecting] = useState(false);
   const [tidying, setTidying] = useState(false);
@@ -47,6 +53,9 @@ export default function ReflectionsView() {
       .then(setInsights)
       .catch((e) => setNotice(String(e)))
       .finally(() => setLoaded(true));
+    forgottenInsights()
+      .then(setForgotten)
+      .catch(() => {});
     calibrationReport()
       .then(setCalib)
       .catch(() => {});
@@ -61,17 +70,19 @@ export default function ReflectionsView() {
       provider: 0,
       user: 0,
       general: 0,
+      forgotten: forgotten.length,
     };
     for (const i of insights) {
       if ((KINDS as readonly string[]).includes(i.kind)) c[i.kind as Kind] += 1;
     }
     return c;
-  }, [insights]);
+  }, [insights, forgotten]);
 
-  const shown = useMemo(
-    () => (filter === "all" ? insights : insights.filter((i) => i.kind === filter)),
-    [insights, filter],
-  );
+  const shown = useMemo(() => {
+    if (filter === "forgotten") return forgotten;
+    if (filter === "all") return insights;
+    return insights.filter((i) => i.kind === filter);
+  }, [insights, forgotten, filter]);
 
   const doReflect = async () => {
     if (reflecting) return;
@@ -118,6 +129,27 @@ export default function ReflectionsView() {
     }
   };
 
+  // The user overruling the scoring is the point: what matters to them is not
+  // something a decay curve can know.
+  const doRestore = async (id: number) => {
+    if (restoring !== null) return;
+    setRestoring(id);
+    setNotice(null);
+    try {
+      const back = await restoreInsight(id);
+      refresh();
+      setNotice(
+        back
+          ? "Lesson restored. It counts as live again and can ride along in prompts."
+          : "That lesson was already live.",
+      );
+    } catch (e) {
+      setNotice(String(e));
+    } finally {
+      setRestoring(null);
+    }
+  };
+
   return (
     <div className="reflections-view">
       <div className="panel-title-row">
@@ -150,6 +182,8 @@ export default function ReflectionsView() {
         After enough activity Jarvis re-reads its own event log and keeps short
         lessons about what worked and what failed. They ride along in future
         prompts, so the assistant gets a little sharper the more you use it.
+        Nothing is deleted when a lesson fades — check <b>forgotten</b> and put
+        anything back.
       </p>
 
       {notice && (
@@ -160,9 +194,9 @@ export default function ReflectionsView() {
 
       <CalibrationPanel report={calib} />
 
-      {insights.length > 0 && (
+      {insights.length + forgotten.length > 0 && (
         <div className="reflect-filters" role="tablist" aria-label="filter lessons by kind">
-          {(["all", ...KINDS] as Filter[]).map((f) => (
+          {(["all", ...KINDS, "forgotten"] as Filter[]).map((f) => (
             <button
               key={f}
               type="button"
@@ -182,13 +216,21 @@ export default function ReflectionsView() {
 
       {shown.length === 0 ? (
         <div className="empty-state">
-          <h1>{loaded ? "No lessons yet" : "Loading…"}</h1>
+          <h1>
+            {!loaded
+              ? "Loading…"
+              : filter === "forgotten"
+                ? "Nothing forgotten"
+                : "No lessons yet"}
+          </h1>
           <p>
             {!inTauri
               ? "This is the browser preview. Launch the app with npm run tauri dev to see Jarvis reflect on real activity."
               : filter === "all"
                 ? "Keep talking to Jarvis. Once there is enough in the event log, a reflection pass distils the first lessons here."
-                : `No ${filter} lessons so far. Try another kind, or run a reflection pass.`}
+                : filter === "forgotten"
+                  ? "Nothing has been dropped. When a lesson fades or gets merged into one it confirms, it lands here — and you can put it back."
+                  : `No ${filter} lessons so far. Try another kind, or run a reflection pass.`}
           </p>
         </div>
       ) : (
@@ -198,7 +240,12 @@ export default function ReflectionsView() {
               ? (i.kind as Kind)
               : "general";
             return (
-              <li key={i.id} className="reflect-card" data-kind={kind}>
+              <li
+                key={i.id}
+                className="reflect-card"
+                data-kind={kind}
+                data-dropped={i.forgotten_at !== null}
+              >
                 <div className="reflect-card-head">
                   <span className="reflect-badge" data-kind={kind}>
                     {kind}
@@ -213,6 +260,27 @@ export default function ReflectionsView() {
                   </time>
                 </div>
                 <p className="reflect-text">{i.content}</p>
+                {i.forgotten_at !== null && (
+                  <p className="reflect-dropped">
+                    <span>
+                      forgotten{" "}
+                      {new Date(i.forgotten_at * 1000).toLocaleDateString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                      })}
+                      {" · the reason is in the event log"}
+                    </span>
+                    <button
+                      type="button"
+                      className="ghost-btn"
+                      disabled={restoring !== null || !inTauri}
+                      title="put this lesson back"
+                      onClick={() => void doRestore(i.id)}
+                    >
+                      {restoring === i.id ? "Restoring…" : "Restore"}
+                    </button>
+                  </p>
+                )}
                 <p className="reflect-source" title={KIND_BLURB[kind]}>
                   {readSource(i.source)}
                   {i.corroborations > 0 && (

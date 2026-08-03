@@ -40,6 +40,10 @@ pub struct Candidate {
     pub corroborations: u32,
     /// Times it has been injected into a prompt.
     pub uses: u32,
+    /// The lesson's embedding, when one has been computed. `None` is the normal
+    /// case, not an error: no embedding model on disk means duplicate detection
+    /// falls back to word overlap rather than silently doing nothing.
+    pub embedding: Option<Vec<f32>>,
 }
 
 /// How many insights we keep. The prompt only ever carries a handful, but the
@@ -55,6 +59,16 @@ pub const SCORE_FLOOR: f64 = 0.22;
 
 /// Token-overlap ratio above which two lessons are treated as the same lesson.
 pub const DUPLICATE_SIMILARITY: f64 = 0.6;
+
+/// Cosine floor for calling two lessons the same by meaning.
+///
+/// Much higher than the token threshold, and deliberately so: sentence
+/// embeddings put *any* two English sentences about the same broad subject in
+/// the 0.7-0.85 range, so a threshold that looks strict for word overlap would
+/// merge lessons that merely share a topic. 0.92 was chosen against real
+/// reflection output: genuine paraphrases land above it, distinct lessons about
+/// the same subject land below.
+pub const DUPLICATE_COSINE: f64 = 0.92;
 
 const W_CORROBORATION: f64 = 0.9;
 const W_USE: f64 = 0.12;
@@ -147,6 +161,54 @@ pub fn similarity(a: &str, b: &str) -> f64 {
     inter / union
 }
 
+/// How two lessons were judged the same, and how strongly.
+///
+/// Kept separate rather than collapsed to one number because the two scales are
+/// not comparable: 0.8 is a strong word overlap and a weak meaning match. A
+/// single field would make the logged reason misleading.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case", tag = "by", content = "score")]
+pub enum Match {
+    /// Compared as embeddings. Catches paraphrase that shares no vocabulary.
+    Meaning(f64),
+    /// Compared as token sets. The fallback when either side lacks a vector.
+    Words(f64),
+}
+
+impl Match {
+    pub fn score(self) -> f64 {
+        match self {
+            Match::Meaning(v) | Match::Words(v) => v,
+        }
+    }
+
+    /// Plain words for the event log, naming the method so a 0.93 meaning match
+    /// is never read as a 0.93 word overlap.
+    pub fn describe(self) -> String {
+        match self {
+            Match::Meaning(v) => format!("{:.0}% meaning match", v * 100.0),
+            Match::Words(v) => format!("{:.0}% word overlap", v * 100.0),
+        }
+    }
+}
+
+/// Decides whether two lessons are the same lesson.
+///
+/// Prefers embeddings when both sides have one of the same width, and falls back
+/// to word overlap otherwise. Mismatched widths mean the vectors came from
+/// different embedding models, and comparing those is meaningless — so that case
+/// falls back too rather than producing a confident wrong number.
+pub fn duplicate_match(a: &Candidate, b: &Candidate) -> Option<Match> {
+    if let (Some(va), Some(vb)) = (&a.embedding, &b.embedding) {
+        if !va.is_empty() && va.len() == vb.len() {
+            let cos = crate::core::embedding::cosine(va, vb) as f64;
+            return (cos >= DUPLICATE_COSINE).then_some(Match::Meaning(cos));
+        }
+    }
+    let sim = similarity(&a.content, &b.content);
+    (sim >= DUPLICATE_SIMILARITY).then_some(Match::Words(sim))
+}
+
 /// One duplicate pair: the established lesson to keep, and the copy to drop.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Merge {
@@ -154,7 +216,8 @@ pub struct Merge {
     pub keep_id: i64,
     /// The newer near-duplicate, which is dropped.
     pub drop_id: i64,
-    pub similarity: f64,
+    /// How the two were judged the same, and how strongly.
+    pub matched: Match,
 }
 
 /// What a maintenance pass would do. Returned rather than applied so the caller
@@ -199,21 +262,20 @@ pub fn plan(candidates: &[Candidate], now: i64, capacity: usize) -> ForgetPlan {
             if dropped.contains(&earlier.id) || earlier.kind != later.kind {
                 continue;
             }
-            let sim = similarity(&earlier.content, &later.content);
-            if sim >= DUPLICATE_SIMILARITY {
+            if let Some(matched) = duplicate_match(earlier, later) {
                 plan.merges.push(Merge {
                     keep_id: earlier.id,
                     drop_id: later.id,
-                    similarity: (sim * 100.0).round() / 100.0,
+                    matched,
                 });
                 *extra_corroboration.entry(earlier.id).or_insert(0) += 1;
                 dropped.push(later.id);
                 plan.reasons.push((
                     later.id,
                     format!(
-                        "merged into #{} (same lesson, {:.0}% overlap)",
+                        "merged into #{} (same lesson, {})",
                         earlier.id,
-                        sim * 100.0
+                        matched.describe()
                     ),
                 ));
                 break;
@@ -302,6 +364,7 @@ mod tests {
             created_at: NOW - age_days * DAY,
             corroborations: 0,
             uses: 0,
+            embedding: None,
         }
     }
 
@@ -598,5 +661,114 @@ mod tests {
         for key in ["merges", "forget", "reasons", "kept"] {
             assert!(json.contains(key), "missing {key}");
         }
+    }
+    // --- duplicate detection by meaning (Reflection v2) ---
+
+    /// A unit vector pointing mostly along `axis`, tilted by `tilt`. Lets a test
+    /// place two lessons at a chosen cosine without needing a real model.
+    fn vec_at(axis: usize, tilt: f32) -> Vec<f32> {
+        let mut v = [0.0f32; 8];
+        v[axis] = 1.0;
+        v[(axis + 1) % 8] = tilt;
+        let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+        v.iter().map(|x| x / norm).collect()
+    }
+
+    fn with_vector(id: i64, content: &str, vector: Option<Vec<f32>>) -> Candidate {
+        Candidate {
+            id,
+            kind: "skill".into(),
+            content: content.into(),
+            created_at: NOW,
+            corroborations: 0,
+            uses: 0,
+            embedding: vector,
+        }
+    }
+
+    #[test]
+    fn paraphrase_with_no_shared_words_is_caught_by_meaning() {
+        // The whole reason for embeddings: these two say the same thing and share
+        // almost no vocabulary, so token overlap cannot see it.
+        let a = with_vector(
+            1,
+            "rhai skills break on string interpolation",
+            Some(vec_at(0, 0.0)),
+        );
+        let b = with_vector(2, "avoid ${} inside generated code", Some(vec_at(0, 0.05)));
+        assert!(
+            similarity(&a.content, &b.content) < DUPLICATE_SIMILARITY,
+            "words alone should miss this"
+        );
+        match duplicate_match(&a, &b) {
+            Some(Match::Meaning(v)) => assert!(v >= DUPLICATE_COSINE, "cosine {v}"),
+            other => panic!("expected a meaning match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn same_topic_different_lesson_is_not_a_duplicate() {
+        // The failure mode embeddings introduce: two lessons about skills are
+        // *related* without being the same, and merging them loses one.
+        let a = with_vector(1, "skill tests catch broken skills", Some(vec_at(0, 0.0)));
+        let b = with_vector(2, "skills should be versioned", Some(vec_at(0, 0.7)));
+        let cos = crate::core::embedding::cosine(
+            a.embedding.as_ref().unwrap(),
+            b.embedding.as_ref().unwrap(),
+        );
+        assert!(cos > 0.7, "these are genuinely related: {cos}");
+        assert!(cos < DUPLICATE_COSINE as f32, "but not the same: {cos}");
+        assert_eq!(duplicate_match(&a, &b), None);
+    }
+
+    #[test]
+    fn a_missing_vector_falls_back_to_words_rather_than_giving_up() {
+        // No embedding model on disk is the normal case, not an error.
+        let a = with_vector(1, "skill tests catch broken skills", None);
+        let b = with_vector(2, "skill test catches a broken skill", None);
+        match duplicate_match(&a, &b) {
+            Some(Match::Words(v)) => assert!(v >= DUPLICATE_SIMILARITY, "overlap {v}"),
+            other => panic!("expected a word match, got {other:?}"),
+        }
+        // One side missing is still a fallback, not a half-comparison.
+        let c = with_vector(3, "skill tests catch broken skills", Some(vec_at(0, 0.0)));
+        assert!(matches!(duplicate_match(&c, &b), Some(Match::Words(_))));
+    }
+
+    #[test]
+    fn vectors_of_different_widths_are_never_compared() {
+        // Different embedding models produce different widths. Comparing them
+        // yields a confident wrong number, so it must fall back instead.
+        let a = with_vector(1, "one lesson", Some(vec![1.0, 0.0]));
+        let b = with_vector(2, "another lesson entirely", Some(vec_at(0, 0.0)));
+        assert!(!matches!(duplicate_match(&a, &b), Some(Match::Meaning(_))));
+    }
+
+    #[test]
+    fn the_logged_reason_names_the_method_it_used() {
+        // 0.93 word overlap and 0.93 cosine mean very different things; a reason
+        // line that hides which one was used is misleading.
+        assert!(Match::Meaning(0.93).describe().contains("meaning"));
+        assert!(Match::Words(0.93).describe().contains("word"));
+        assert_ne!(
+            Match::Meaning(0.93).describe(),
+            Match::Words(0.93).describe()
+        );
+    }
+
+    #[test]
+    fn a_meaning_duplicate_is_merged_and_credits_the_keeper() {
+        // End to end through plan(): the paraphrase is dropped, the original
+        // absorbs the corroboration, and the reason says how it was judged.
+        let mut older = with_vector(1, "rhai breaks on interpolation", Some(vec_at(0, 0.0)));
+        older.created_at = NOW - 10 * DAY;
+        let newer = with_vector(2, "never use ${} in generated code", Some(vec_at(0, 0.05)));
+        let plan = plan(&[older, newer], NOW, CAPACITY);
+        assert_eq!(plan.merges.len(), 1, "{plan:?}");
+        assert_eq!(plan.merges[0].keep_id, 1, "the older copy survives");
+        assert_eq!(plan.merges[0].drop_id, 2);
+        assert!(matches!(plan.merges[0].matched, Match::Meaning(_)));
+        let reason = &plan.reasons.iter().find(|(id, _)| *id == 2).unwrap().1;
+        assert!(reason.contains("meaning match"), "{reason}");
     }
 }
